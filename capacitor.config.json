@@ -1,0 +1,12 @@
+{
+  "appId": "com.casilisto.app",
+  "appName": "Casilisto",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#fef3c7"
+  },
+  "server": {
+    "iosScheme": "capacitor"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "Casilisto - Lista de Compras",
+  "short_name": "Casilisto",
+  "description": "Tu lista de compras inteligente. Organiza por categorías y funciona offline.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fef3c7",
+  "theme_color": "#facc15",
+  "lang": "es-ES",
+  "orientation": "portrait",
+  "categories": ["shopping", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
