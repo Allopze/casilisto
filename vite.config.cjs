@@ -29,6 +29,12 @@ module.exports = defineConfig({
   server: {
     host: true,
     port: 1103,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
   },
   test: {
     environment: 'jsdom',

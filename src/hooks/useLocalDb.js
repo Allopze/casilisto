@@ -1,10 +1,72 @@
 /**
  * Hook para gestionar la base de datos local (localStorage).
  * Centraliza la lógica de persistencia y normalización de datos.
+ * Incluye soporte para sincronización entre dispositivos.
  */
 import { useState, useEffect } from 'react';
 
 export const DB_KEY = 'casilisto_db_v1';
+export const SYNC_KEY = 'casilisto_sync_v1';
+
+// Generar UUID único para el dispositivo
+function generateDeviceId() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// Detectar nombre del dispositivo desde User Agent
+function detectDeviceName() {
+  const ua = navigator.userAgent;
+  let browser = 'Navegador';
+  let os = 'Desconocido';
+  
+  // Detectar navegador
+  if (ua.includes('Firefox')) browser = 'Firefox';
+  else if (ua.includes('Edg')) browser = 'Edge';
+  else if (ua.includes('Chrome')) browser = 'Chrome';
+  else if (ua.includes('Safari')) browser = 'Safari';
+  else if (ua.includes('Opera') || ua.includes('OPR')) browser = 'Opera';
+  
+  // Detectar SO
+  if (ua.includes('iPhone')) os = 'iPhone';
+  else if (ua.includes('iPad')) os = 'iPad';
+  else if (ua.includes('Android')) os = 'Android';
+  else if (ua.includes('Mac')) os = 'Mac';
+  else if (ua.includes('Windows')) os = 'Windows';
+  else if (ua.includes('Linux')) os = 'Linux';
+  
+  return `${browser} en ${os}`;
+}
+
+// Cargar/guardar datos de sincronización
+export function loadSyncData() {
+  try {
+    const raw = localStorage.getItem(SYNC_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error leyendo datos de sync', e);
+  }
+  
+  // Valores por defecto
+  return {
+    deviceId: generateDeviceId(),
+    deviceName: detectDeviceName(),
+    userCode: null,
+    lastSyncAt: 0,
+    pendingChanges: false
+  };
+}
+
+export function saveSyncData(syncData) {
+  try {
+    localStorage.setItem(SYNC_KEY, JSON.stringify(syncData));
+  } catch (e) {
+    console.error('Error guardando datos de sync', e);
+  }
+}
 
 // --- Utilidades de normalización ---
 
@@ -406,17 +468,80 @@ export function useLocalDb() {
   const [masterList, setMasterList] = useState(getInitialMasterList);
   const [items, setItems] = useState(getInitialItems);
   const [favorites, setFavorites] = useState(getInitialFavorites);
+  const [syncInfo, setSyncInfo] = useState(loadSyncData);
+  const [dataVersion, setDataVersion] = useState(0); // Incrementa con cada cambio
+  
+  // Modo Baco - persistido en localStorage
+  const [bacoMode, setBacoMode] = useState(() => {
+    try {
+      return localStorage.getItem('casilisto_baco_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
-  // Persistir cambios
+  // Persistir Modo Baco
+  useEffect(() => {
+    try {
+      localStorage.setItem('casilisto_baco_mode', bacoMode.toString());
+    } catch (e) {
+      console.error('Error guardando modo baco', e);
+    }
+  }, [bacoMode]);
+
+  // Persistir cambios en localStorage
   useEffect(() => {
     if (typeof localStorage === 'undefined') return;
     try {
-      const payload = { items, categories, masterList, favorites };
+      const payload = { 
+        items, 
+        categories, 
+        masterList, 
+        favorites,
+        lastModified: Date.now()
+      };
       localStorage.setItem(DB_KEY, JSON.stringify(payload));
+      
+      // Marcar que hay cambios pendientes si está vinculado
+      if (syncInfo.userCode) {
+        const newSyncInfo = { ...syncInfo, pendingChanges: true };
+        setSyncInfo(newSyncInfo);
+        saveSyncData(newSyncInfo);
+      }
     } catch (e) {
       console.error('Error guardando base de datos local', e);
     }
   }, [items, categories, masterList, favorites]);
+
+  // Función para actualizar datos de sync
+  const updateSyncInfo = (updates) => {
+    const newSyncInfo = { ...syncInfo, ...updates };
+    setSyncInfo(newSyncInfo);
+    saveSyncData(newSyncInfo);
+  };
+
+  // Función para obtener datos actuales para sync
+  const getDataForSync = () => ({
+    items,
+    categories,
+    masterList,
+    favorites
+  });
+
+  // Función para aplicar datos del servidor
+  const applyServerData = (serverData) => {
+    if (serverData.items) setItems(normalizeItemList(serverData.items));
+    if (serverData.categories) setCategories(normalizeCategoryMap(serverData.categories));
+    if (serverData.masterList) setMasterList(normalizeItemList(serverData.masterList));
+    if (serverData.favorites) setFavorites(normalizeItemList(serverData.favorites));
+    setDataVersion(v => v + 1);
+  };
+
+  // Obtener lastModified de localStorage
+  const getLastModified = () => {
+    const db = loadDb();
+    return db?.lastModified || 0;
+  };
 
   return {
     categories,
@@ -428,6 +553,16 @@ export function useLocalDb() {
     favorites,
     setFavorites,
     normalizeCategoryName,
+    // Modo Baco
+    bacoMode,
+    setBacoMode,
+    // Nuevas propiedades para sync
+    syncInfo,
+    updateSyncInfo,
+    getDataForSync,
+    applyServerData,
+    getLastModified,
+    dataVersion,
   };
 }
 

@@ -1,7 +1,7 @@
 /**
  * Componente que muestra un ítem de la lista de compras
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Plus, Trash2, Minus, GripVertical, ChevronUp, Edit3 } from 'lucide-react';
 
 export default function ShoppingItem({
@@ -10,6 +10,7 @@ export default function ShoppingItem({
   isDragging,
   categories,
   isFavorite,
+  bacoMode,
   onToggle,
   onExpand,
   onQuantityChange,
@@ -19,6 +20,24 @@ export default function ShoppingItem({
   dragHandlers,
 }) {
   const { onDragStart, onDragEnter, onDragEnd, onTouchStart, onTouchMove, onTouchEnd } = dragHandlers;
+  const [isShaking, setIsShaking] = useState(false);
+
+  // Verificar si el item es de la categoría Vinos y Modo Baco está activo
+  const isBacoProtected = bacoMode && item.category === 'Vinos';
+
+  const handleToggle = () => {
+    if (isBacoProtected) {
+      // Vibrar si está disponible
+      if (navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+      // Activar animación de shake
+      setIsShaking(true);
+      setTimeout(() => setIsShaking(false), 500);
+      return;
+    }
+    onToggle();
+  };
 
   return (
     <div
@@ -28,8 +47,22 @@ export default function ShoppingItem({
       onDragEnter={onDragEnter}
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
-      className={`bg-white rounded-3xl shadow-sm border border-stone-100 transition-all touch-manipulation ${isDragging ? 'opacity-30 bg-stone-50' : ''}`}
+      className={`bg-white rounded-3xl shadow-sm border transition-all touch-manipulation ${
+        isDragging ? 'opacity-30 bg-stone-50 border-stone-100' : ''
+      } ${isBacoProtected ? 'border-purple-200 bg-purple-50/30' : 'border-stone-100'} ${
+        isShaking ? 'animate-shake' : ''
+      }`}
+      style={isShaking ? {
+        animation: 'shake 0.5s ease-in-out'
+      } : {}}
     >
+      <style>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+          20%, 40%, 60%, 80% { transform: translateX(4px); }
+        }
+      `}</style>
       <div className="flex items-center p-3 relative">
         <div
           className="mr-2 text-stone-300 cursor-grab active:cursor-grabbing p-2 -ml-2 touch-none"
@@ -40,10 +73,15 @@ export default function ShoppingItem({
           <GripVertical className="w-5 h-5" />
         </div>
         <div
-          onClick={onToggle}
-          className="w-8 h-8 rounded-2xl border-2 border-stone-200 mr-3 flex-shrink-0 flex items-center justify-center cursor-pointer active:scale-90 transition-all hover:border-yellow-400 bg-stone-50"
-        ></div>
-        <div className="flex-1 min-w-0 pr-2 cursor-pointer" onClick={onToggle}>
+          onClick={handleToggle}
+          className={`w-8 h-8 rounded-2xl border-2 mr-3 flex-shrink-0 flex items-center justify-center cursor-pointer active:scale-90 transition-all ${
+            isBacoProtected 
+              ? 'border-purple-300 bg-purple-100 hover:border-purple-400' 
+              : 'border-stone-200 bg-stone-50 hover:border-yellow-400'
+          }`}
+        >
+        </div>
+        <div className="flex-1 min-w-0 pr-2 cursor-pointer" onClick={handleToggle}>
           <span className="text-lg font-medium text-stone-800 block truncate">{item.text}</span>
         </div>
         <button

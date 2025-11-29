@@ -19,6 +19,7 @@ import {
   Menu,
   Tag,
   User,
+  Wine,
 } from 'lucide-react';
 
 import useLocalDb, {
@@ -33,6 +34,7 @@ import useLocalDb, {
   getInitialFavorites,
 } from './hooks/useLocalDb';
 import useDragAndDrop from './hooks/useDragAndDrop';
+import useSync, { SyncStatus } from './hooks/useSync';
 import Sidebar from './components/Sidebar';
 import FavoritesBar from './components/FavoritesBar';
 import ShoppingItem from './components/ShoppingItem';
@@ -67,11 +69,29 @@ const ICON_MAP = {
   ShoppingCart,
   Tag,
   User,
+  Wine,
 };
 
 export default function App() {
-  const { categories, setCategories, masterList, setMasterList, items, setItems, favorites, setFavorites } =
-    useLocalDb();
+  const { 
+    categories, setCategories, 
+    masterList, setMasterList, 
+    items, setItems, 
+    favorites, setFavorites,
+    bacoMode, setBacoMode,
+    // Propiedades de sync
+    syncInfo, updateSyncInfo, getDataForSync, applyServerData, getLastModified, dataVersion
+  } = useLocalDb();
+
+  // Hook de sincronización
+  const sync = useSync({
+    syncInfo,
+    updateSyncInfo,
+    getDataForSync,
+    applyServerData,
+    getLastModified,
+    dataVersion
+  });
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [expandedItemId, setExpandedItemId] = useState(null);
@@ -154,7 +174,9 @@ export default function App() {
   };
 
   const itemsToBuy = items.filter((item) => !item.completed);
-  const itemsCompleted = items.filter((item) => item.completed);
+  const itemsCompleted = items
+    .filter((item) => item.completed)
+    .sort((a, b) => a.text.localeCompare(b.text, 'es', { sensitivity: 'base' }));
 
   const repeatCompletedItems = () => {
     if (itemsCompleted.length === 0) return;
@@ -220,14 +242,20 @@ export default function App() {
       );
     }
 
-    const catsToRender = [...new Set([...Object.keys(categories), 'Otros'])];
+    // Ordenar categorías alfabéticamente, con Vinos primero si Modo Baco activo
+    let catsToRender = [...new Set([...Object.keys(categories), 'Otros'])]
+      .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+    if (bacoMode && catsToRender.includes('Vinos')) {
+      catsToRender = ['Vinos', ...catsToRender.filter(c => c !== 'Vinos')];
+    }
 
     return catsToRender.map((catName) => {
       if (!categories[catName] && catName !== 'Otros') return null;
 
       const catItems = items
         .map((item, originalIndex) => ({ ...item, originalIndex }))
-        .filter((item) => !item.completed && item.category === catName);
+        .filter((item) => !item.completed && item.category === catName)
+        .sort((a, b) => a.text.localeCompare(b.text, 'es', { sensitivity: 'base' }));
 
       if (catItems.length === 0) return null;
 
@@ -251,6 +279,7 @@ export default function App() {
                 isDragging={draggingId === item.id}
                 categories={categories}
                 isFavorite={isFavorite(item.text)}
+                bacoMode={bacoMode}
                 onToggle={() => toggleItem(item.id)}
                 onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
                 onQuantityChange={(delta) => updateQuantity(item.id, delta)}
@@ -288,6 +317,9 @@ export default function App() {
         items={items}
         setItems={setItems}
         ICON_MAP={ICON_MAP}
+        sync={sync}
+        bacoMode={bacoMode}
+        setBacoMode={setBacoMode}
       />
 
       {/* --- APP PRINCIPAL --- */}

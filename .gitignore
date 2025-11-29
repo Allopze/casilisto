@@ -1,0 +1,28 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# iOS/Capacitor
+ios/App/Pods
+ios/App/App/public
+*.xcworkspace
+*.xcuserdata
+
+# Environment
+.env
+.env.local
