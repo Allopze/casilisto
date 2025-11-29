@@ -4,22 +4,7 @@
  * Soporta modo offline con cola de sincronización.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-
-// Detectar URL del servidor automáticamente
-// El servidor unificado sirve frontend Y API desde el mismo origen
-function getApiBase() {
-  // Si hay variable de entorno, usarla
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
-  }
-  
-  // En producción: misma URL que el frontend (servidor unificado)
-  // En desarrollo: localhost:3000 (o el puerto del servidor unificado)
-  const { hostname, protocol, port } = window.location;
-  
-  // Si estamos en el servidor unificado, usar el mismo origen
-  return `${protocol}//${hostname}${port ? ':' + port : ''}`;
-}
+import { getApiBase } from '../utils/platform';
 
 const API_BASE = getApiBase();
 

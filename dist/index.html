@@ -3,11 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <title>Casilisto - Lista de Compras</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
     <meta name="description" content="Tu lista de compras inteligente. Organiza tus compras por categorías, guarda favoritos y funciona sin conexión." />
     
     <!-- PWA -->
-    <meta name="theme-color" content="#facc15" />
+    <meta name="theme-color" content="#FDE047" />
+    <meta name="background-color" content="#FDE047" />
     <link rel="manifest" href="/manifest.webmanifest" />
     
     <!-- Icons -->
@@ -16,16 +17,44 @@
     
     <!-- Apple PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Casilisto" />
+    
+    <!-- Capacitor -->
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="msapplication-tap-highlight" content="no" />
     
     <!-- Open Graph -->
     <meta property="og:title" content="Casilisto - Lista de Compras" />
     <meta property="og:description" content="Tu lista de compras inteligente. Organiza por categorías y funciona offline." />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/og-image.png" />
-    <script type="module" crossorigin src="/assets/index-Cu_yz_34.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Ctfdj7Ma.css">
+    
+    <style>
+      /* Safe area insets para iOS (notch, home indicator) */
+      :root {
+        --sat: env(safe-area-inset-top);
+        --sar: env(safe-area-inset-right);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+      }
+      
+      /* Padding para dispositivos con notch */
+      body {
+        padding-top: var(--sat);
+        padding-right: var(--sar);
+        padding-bottom: var(--sab);
+        padding-left: var(--sal);
+      }
+      
+      /* Prevenir scroll bouncing en iOS */
+      html, body {
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-CJMZaqq2.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B2SYg441.css">
   </head>
   <body class="bg-yellow-50">
     <div id="root"></div>

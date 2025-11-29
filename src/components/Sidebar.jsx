@@ -61,6 +61,7 @@ export default function Sidebar({
   const [codeCopied, setCodeCopied] = useState(false);
   const [showLinkForm, setShowLinkForm] = useState(false);
   const [deviceToUnlink, setDeviceToUnlink] = useState(null);
+  const [showDisconnectModal, setShowDisconnectModal] = useState(false);
 
   const addCategory = () => {
     if (!newCatName.trim()) return;
@@ -625,11 +626,7 @@ export default function Sidebar({
 
                 {/* Desconectar */}
                 <button
-                  onClick={() => {
-                    if (window.confirm('¿Desconectar este dispositivo? Tus datos locales se mantendrán.')) {
-                      sync.disconnect();
-                    }
-                  }}
+                  onClick={() => setShowDisconnectModal(true)}
                   className="w-full py-3 text-red-600 font-medium text-sm flex items-center justify-center gap-2 hover:bg-red-50 rounded-xl"
                 >
                   <LogOut className="w-4 h-4" />
@@ -666,6 +663,41 @@ export default function Sidebar({
                     className="flex-1 py-3 bg-red-500 text-white font-bold rounded-xl"
                   >
                     Desvincular
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal de confirmación para desconectar cuenta */}
+          {showDisconnectModal && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/50" onClick={() => setShowDisconnectModal(false)} />
+              <div className="relative bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
+                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                  <LogOut className="w-6 h-6 text-red-600" />
+                </div>
+                <h3 className="font-bold text-lg text-stone-800 mb-2 text-center">
+                  ¿Desconectar cuenta?
+                </h3>
+                <p className="text-stone-600 mb-4 text-center text-sm">
+                  Se desvinculará la sincronización de este dispositivo. Tus datos locales se mantendrán intactos.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowDisconnectModal(false)}
+                    className="flex-1 py-3 bg-stone-200 text-stone-700 font-bold rounded-xl active:scale-95 transition-transform"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      sync.disconnect();
+                      setShowDisconnectModal(false);
+                    }}
+                    className="flex-1 py-3 bg-red-500 text-white font-bold rounded-xl active:scale-95 transition-transform"
+                  >
+                    Desconectar
                   </button>
                 </div>
               </div>

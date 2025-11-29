@@ -529,11 +529,24 @@ export function useLocalDb() {
   });
 
   // Función para aplicar datos del servidor
+  // IMPORTANTE: Nunca sobrescribir con datos vacíos
   const applyServerData = (serverData) => {
-    if (serverData.items) setItems(normalizeItemList(serverData.items));
-    if (serverData.categories) setCategories(normalizeCategoryMap(serverData.categories));
-    if (serverData.masterList) setMasterList(normalizeItemList(serverData.masterList));
-    if (serverData.favorites) setFavorites(normalizeItemList(serverData.favorites));
+    // Solo aplicar items si hay al menos uno
+    if (serverData.items && Array.isArray(serverData.items) && serverData.items.length > 0) {
+      setItems(normalizeItemList(serverData.items));
+    }
+    // Solo aplicar categories si hay al menos una
+    if (serverData.categories && typeof serverData.categories === 'object' && Object.keys(serverData.categories).length > 0) {
+      setCategories(normalizeCategoryMap(serverData.categories));
+    }
+    // Solo aplicar masterList si hay al menos uno
+    if (serverData.masterList && Array.isArray(serverData.masterList) && serverData.masterList.length > 0) {
+      setMasterList(normalizeItemList(serverData.masterList));
+    }
+    // Favoritos pueden estar vacíos, eso es válido
+    if (serverData.favorites && Array.isArray(serverData.favorites)) {
+      setFavorites(normalizeItemList(serverData.favorites));
+    }
     setDataVersion(v => v + 1);
   };
 

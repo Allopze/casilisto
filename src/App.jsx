@@ -35,6 +35,7 @@ import useLocalDb, {
 } from './hooks/useLocalDb';
 import useDragAndDrop from './hooks/useDragAndDrop';
 import useSync, { SyncStatus } from './hooks/useSync';
+import { useNativeInit } from './hooks/useNative';
 import Sidebar from './components/Sidebar';
 import FavoritesBar from './components/FavoritesBar';
 import ShoppingItem from './components/ShoppingItem';
@@ -92,6 +93,9 @@ export default function App() {
     getLastModified,
     dataVersion
   });
+
+  // Inicializar app nativa (splash screen, status bar)
+  useNativeInit();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [expandedItemId, setExpandedItemId] = useState(null);

@@ -3,6 +3,7 @@
  */
 import React, { useState } from 'react';
 import { Plus, Trash2, Minus, GripVertical, ChevronUp, Edit3 } from 'lucide-react';
+import useNative from '../hooks/useNative';
 
 export default function ShoppingItem({
   item,
@@ -21,16 +22,15 @@ export default function ShoppingItem({
 }) {
   const { onDragStart, onDragEnter, onDragEnd, onTouchStart, onTouchMove, onTouchEnd } = dragHandlers;
   const [isShaking, setIsShaking] = useState(false);
+  const { vibrate } = useNative();
 
   // Verificar si el item es de la categoría Vinos y Modo Baco está activo
   const isBacoProtected = bacoMode && item.category === 'Vinos';
 
-  const handleToggle = () => {
+  const handleToggle = async () => {
     if (isBacoProtected) {
-      // Vibrar si está disponible
-      if (navigator.vibrate) {
-        navigator.vibrate([100, 50, 100]);
-      }
+      // Vibrar usando haptics nativo o fallback
+      await vibrate('error');
       // Activar animación de shake
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 500);
