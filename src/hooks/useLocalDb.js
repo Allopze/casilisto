@@ -471,9 +471,15 @@ export function useLocalDb() {
   const [syncInfo, setSyncInfo] = useState(loadSyncData);
   const [dataVersion, setDataVersion] = useState(0); // Incrementa con cada cambio
   
-  // Modo Baco - persistido en localStorage
+  // Modo Baco - persistido en localStorage y sincronizado
   const [bacoMode, setBacoMode] = useState(() => {
     try {
+      // Primero intentar cargar desde la DB principal (sincronizada)
+      const db = loadDb();
+      if (db && typeof db.bacoMode === 'boolean') {
+        return db.bacoMode;
+      }
+      // Fallback a la clave antigua
       return localStorage.getItem('casilisto_baco_mode') === 'true';
     } catch {
       return false;
@@ -498,6 +504,7 @@ export function useLocalDb() {
         categories, 
         masterList, 
         favorites,
+        bacoMode,
         lastModified: Date.now()
       };
       localStorage.setItem(DB_KEY, JSON.stringify(payload));
@@ -511,7 +518,7 @@ export function useLocalDb() {
     } catch (e) {
       console.error('Error guardando base de datos local', e);
     }
-  }, [items, categories, masterList, favorites]);
+  }, [items, categories, masterList, favorites, bacoMode]);
 
   // Función para actualizar datos de sync
   const updateSyncInfo = (updates) => {
@@ -525,7 +532,8 @@ export function useLocalDb() {
     items,
     categories,
     masterList,
-    favorites
+    favorites,
+    bacoMode
   });
 
   // Función para aplicar datos del servidor
@@ -546,6 +554,10 @@ export function useLocalDb() {
     // Favoritos pueden estar vacíos, eso es válido
     if (serverData.favorites && Array.isArray(serverData.favorites)) {
       setFavorites(normalizeItemList(serverData.favorites));
+    }
+    // Sincronizar modo Baco
+    if (typeof serverData.bacoMode === 'boolean') {
+      setBacoMode(serverData.bacoMode);
     }
     setDataVersion(v => v + 1);
   };
