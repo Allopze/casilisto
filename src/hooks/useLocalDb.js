@@ -3,7 +3,7 @@
  * Centraliza la lógica de persistencia y normalización de datos.
  * Incluye soporte para sincronización entre dispositivos.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 export const DB_KEY = 'casilisto_db_v1';
 export const SYNC_KEY = 'casilisto_sync_v1';
@@ -510,35 +510,41 @@ export function useLocalDb() {
       localStorage.setItem(DB_KEY, JSON.stringify(payload));
       
       // Marcar que hay cambios pendientes si está vinculado
-      if (syncInfo.userCode) {
-        const newSyncInfo = { ...syncInfo, pendingChanges: true };
-        setSyncInfo(newSyncInfo);
-        saveSyncData(newSyncInfo);
-      }
+      // Usamos setSyncInfo con callback para evitar stale closure
+      setSyncInfo(prev => {
+        if (prev.userCode) {
+          const newSyncInfo = { ...prev, pendingChanges: true };
+          saveSyncData(newSyncInfo);
+          return newSyncInfo;
+        }
+        return prev;
+      });
     } catch (e) {
       console.error('Error guardando base de datos local', e);
     }
   }, [items, categories, masterList, favorites, bacoMode]);
 
   // Función para actualizar datos de sync
-  const updateSyncInfo = (updates) => {
-    const newSyncInfo = { ...syncInfo, ...updates };
-    setSyncInfo(newSyncInfo);
-    saveSyncData(newSyncInfo);
-  };
+  const updateSyncInfo = useCallback((updates) => {
+    setSyncInfo(prev => {
+      const newSyncInfo = { ...prev, ...updates };
+      saveSyncData(newSyncInfo);
+      return newSyncInfo;
+    });
+  }, []);
 
-  // Función para obtener datos actuales para sync
-  const getDataForSync = () => ({
-    items,
-    categories,
-    masterList,
-    favorites,
-    bacoMode
-  });
+  // Refs para mantener valores actualizados en callbacks asíncronos
+  const dataRef = useRef({ items, categories, masterList, favorites, bacoMode });
+  useEffect(() => {
+    dataRef.current = { items, categories, masterList, favorites, bacoMode };
+  }, [items, categories, masterList, favorites, bacoMode]);
+
+  // Función para obtener datos actuales para sync (usa ref para evitar stale closures)
+  const getDataForSync = useCallback(() => dataRef.current, []);
 
   // Función para aplicar datos del servidor
   // IMPORTANTE: Nunca sobrescribir con datos vacíos
-  const applyServerData = (serverData) => {
+  const applyServerData = useCallback((serverData) => {
     // Solo aplicar items si hay al menos uno
     if (serverData.items && Array.isArray(serverData.items) && serverData.items.length > 0) {
       setItems(normalizeItemList(serverData.items));
@@ -560,7 +566,7 @@ export function useLocalDb() {
       setBacoMode(serverData.bacoMode);
     }
     setDataVersion(v => v + 1);
-  };
+  }, []);
 
   // Obtener lastModified de localStorage
   const getLastModified = () => {

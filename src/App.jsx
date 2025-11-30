@@ -183,8 +183,11 @@ export default function App() {
     .sort((a, b) => a.text.localeCompare(b.text, 'es', { sensitivity: 'base' }));
 
   const repeatCompletedItems = () => {
-    if (itemsCompleted.length === 0) return;
-    setItems(items.map((i) => (i.completed ? { ...i, completed: false } : i)));
+    setItems(prevItems => {
+      const hasCompleted = prevItems.some(i => i.completed);
+      if (!hasCompleted) return prevItems;
+      return prevItems.map((i) => (i.completed ? { ...i, completed: false } : i));
+    });
   };
 
   const toggleItem = (id) => {
@@ -482,7 +485,7 @@ export default function App() {
       <ConfirmModal
         isOpen={showResetModal}
         onClose={() => setShowResetModal(false)}
-        onConfirm={() => setItems(items.map((item) => ({ ...item, completed: false })))}
+        onConfirm={() => setItems(prevItems => prevItems.map((item) => ({ ...item, completed: false })))}
         title="¿Nueva semana?"
         message="Todos los productos completados volverán a la lista de compras pendientes."
         confirmText="Reiniciar"
