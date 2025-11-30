@@ -13,7 +13,11 @@ import {
   unlinkDevice,
   saveSyncData,
   getSyncData,
-  getLastUpdated
+  getLastUpdated,
+  cleanupInactiveDevices,
+  mergeItems,
+  mergeCategories,
+  mergeFavorites
 } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,12 +26,72 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// P2: Rate limiting simple en memoria
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60000; // 1 minuto
+const RATE_LIMIT_MAX = 100; // 100 requests por minuto por IP
+
+function rateLimit(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  
+  if (!rateLimitMap.has(ip)) {
+    rateLimitMap.set(ip, { count: 1, windowStart: now });
+    return next();
+  }
+  
+  const data = rateLimitMap.get(ip);
+  
+  // Reset window si ha pasado
+  if (now - data.windowStart > RATE_LIMIT_WINDOW) {
+    rateLimitMap.set(ip, { count: 1, windowStart: now });
+    return next();
+  }
+  
+  // Incrementar contador
+  data.count++;
+  
+  if (data.count > RATE_LIMIT_MAX) {
+    return res.status(429).json({ 
+      success: false, 
+      error: 'Demasiadas peticiones. Espera un minuto.' 
+    });
+  }
+  
+  next();
+}
+
+// Limpiar rate limit map cada 5 minutos
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of rateLimitMap.entries()) {
+    if (now - data.windowStart > RATE_LIMIT_WINDOW * 2) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, 300000);
+
+// P1: Limpiar dispositivos inactivos cada 24 horas
+setInterval(() => {
+  const cleaned = cleanupInactiveDevices();
+  if (cleaned > 0) {
+    console.log(`Limpieza: ${cleaned} dispositivos inactivos eliminados`);
+  }
+}, 24 * 60 * 60 * 1000);
+
+// Limpiar una vez al iniciar también
+cleanupInactiveDevices();
+
 // Middleware
 app.use(express.json({ limit: '5mb' }));
+app.use(rateLimit); // P2: Aplicar rate limiting
 
-// Logging simple
+// Logging simple (P3: Solo en desarrollo)
+const isDev = process.env.NODE_ENV !== 'production';
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+  if (isDev) {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+  }
   next();
 });
 
@@ -62,10 +126,20 @@ app.post('/api/user/login', (req, res) => {
       return res.status(404).json({ success: false, error: 'Código no encontrado' });
     }
     
-    registerDevice(normalizedCode, deviceId, deviceName || 'Dispositivo desconocido');
+    try {
+      registerDevice(normalizedCode, deviceId, deviceName || 'Dispositivo desconocido');
+    } catch (err) {
+      if (err.message.includes('Límite de dispositivos')) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      throw err;
+    }
+    
     const data = getSyncData(normalizedCode);
     
-    console.log(`Dispositivo ${deviceId} vinculado a cuenta ${normalizedCode}`);
+    if (isDev) {
+      console.log(`Dispositivo ${deviceId} vinculado a cuenta ${normalizedCode}`);
+    }
     res.json({ success: true, code: normalizedCode, data });
   } catch (err) {
     console.error('Error en login:', err);
@@ -74,6 +148,8 @@ app.post('/api/user/login', (req, res) => {
 });
 
 // Push datos
+// P1: Implementar merge inteligente en lugar de "gana el más reciente"
+// P2: Usar timestamp del servidor como fuente de verdad
 app.post('/api/sync/push', (req, res) => {
   try {
     const { code, deviceId, deviceName, data, localUpdatedAt } = req.body;
@@ -88,16 +164,53 @@ app.post('/api/sync/push', (req, res) => {
       return res.status(404).json({ success: false, error: 'Código no encontrado' });
     }
     
-    registerDevice(normalizedCode, deviceId, deviceName || 'Dispositivo');
+    try {
+      registerDevice(normalizedCode, deviceId, deviceName || 'Dispositivo');
+    } catch (err) {
+      if (err.message.includes('Límite de dispositivos')) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      throw err;
+    }
+    
+    const serverData = getSyncData(normalizedCode);
     const serverUpdatedAt = getLastUpdated(normalizedCode);
     
-    if (localUpdatedAt >= serverUpdatedAt) {
-      saveSyncData(normalizedCode, data);
-      console.log(`Sync push: ${normalizedCode} desde ${deviceId}`);
-      res.json({ success: true, serverUpdatedAt: Date.now() });
+    // P2: El servidor genera el timestamp (fuente de verdad)
+    const serverTimestamp = Date.now();
+    
+    // P1: Merge inteligente si hay datos en ambos lados
+    if (serverData && serverData.items && serverData.items.length > 0) {
+      // Hay datos en el servidor - hacer merge
+      const mergedData = {
+        items: mergeItems(serverData.items || [], data.items || []),
+        categories: mergeCategories(serverData.categories || {}, data.categories || {}),
+        masterList: mergeItems(serverData.masterList || [], data.masterList || []),
+        favorites: mergeFavorites(serverData.favorites || [], data.favorites || []),
+        bacoMode: data.bacoMode !== undefined ? data.bacoMode : serverData.bacoMode
+      };
+      
+      saveSyncData(normalizedCode, mergedData);
+      
+      if (isDev) {
+        console.log(`Sync push (merge): ${normalizedCode} desde ${deviceId}`);
+      }
+      
+      res.json({ 
+        success: true, 
+        serverUpdatedAt: serverTimestamp,
+        merged: true,
+        mergedData // Devolver datos mergeados para que el cliente se sincronice
+      });
     } else {
-      const serverData = getSyncData(normalizedCode);
-      res.json({ success: true, conflict: true, serverData, serverUpdatedAt });
+      // No hay datos en servidor, aceptar datos del cliente
+      saveSyncData(normalizedCode, data);
+      
+      if (isDev) {
+        console.log(`Sync push: ${normalizedCode} desde ${deviceId}`);
+      }
+      
+      res.json({ success: true, serverUpdatedAt: serverTimestamp });
     }
   } catch (err) {
     console.error('Error en push:', err);
@@ -120,7 +233,14 @@ app.get('/api/sync/pull', (req, res) => {
       return res.status(404).json({ success: false, error: 'Código no encontrado' });
     }
     
-    registerDevice(normalizedCode, deviceId, deviceName || 'Dispositivo');
+    try {
+      registerDevice(normalizedCode, deviceId, deviceName || 'Dispositivo');
+    } catch (err) {
+      if (err.message.includes('Límite de dispositivos')) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      throw err;
+    }
     
     const serverUpdatedAt = getLastUpdated(normalizedCode);
     const sinceTimestamp = parseInt(since) || 0;
@@ -179,7 +299,9 @@ app.delete('/api/devices/:deviceId', (req, res) => {
     const unlinked = unlinkDevice(normalizedCode, deviceId);
     
     if (unlinked) {
-      console.log(`Dispositivo ${deviceId} desvinculado de ${normalizedCode}`);
+      if (isDev) {
+        console.log(`Dispositivo ${deviceId} desvinculado de ${normalizedCode}`);
+      }
       res.json({ success: true });
     } else {
       res.status(404).json({ success: false, error: 'Dispositivo no encontrado' });

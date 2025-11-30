@@ -13,8 +13,17 @@ const ASSET_CACHE = `casilisto-assets-${CACHE_VERSION}`;
 const SYNC_QUEUE_NAME = 'casilisto-sync-queue';
 const SYNC_TAG = 'casilisto-sync';
 
-// URLs base que siempre precacheamos
-const OFFLINE_URLS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
+// P2: Límite de entradas en cache de assets
+const MAX_ASSET_CACHE_SIZE = 50;
+
+// P3: URLs base que siempre precacheamos (incluyendo iconos)
+const OFFLINE_URLS = [
+  '/', 
+  '/index.html', 
+  '/manifest.webmanifest', 
+  '/icon.svg',
+  '/favicon.ico'
+];
 
 // IndexedDB para cola de sincronización offline
 const DB_NAME = 'casilisto-sw-db';
@@ -166,13 +175,22 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Assets hasheados de Vite (/assets/*): cache-first (inmutables por hash)
+  // P2: Con límite de tamaño de cache
   if (url.pathname.startsWith('/assets/')) {
     event.respondWith(
       caches.open(ASSET_CACHE).then(async (cache) => {
         const cached = await cache.match(request);
         if (cached) return cached;
+        
         const response = await fetch(request);
         if (response.ok) {
+          // P2: Verificar tamaño del cache antes de añadir
+          const keys = await cache.keys();
+          if (keys.length >= MAX_ASSET_CACHE_SIZE) {
+            // Eliminar las entradas más antiguas (primeras en la lista)
+            const keysToDelete = keys.slice(0, Math.floor(MAX_ASSET_CACHE_SIZE / 4));
+            await Promise.all(keysToDelete.map(key => cache.delete(key)));
+          }
           cache.put(request, response.clone());
         }
         return response;

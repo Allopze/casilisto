@@ -20,6 +20,9 @@ import {
   Tag,
   User,
   Wine,
+  ChevronDown,
+  RefreshCw,
+  AlertTriangle,
 } from 'lucide-react';
 
 import useLocalDb, {
@@ -32,6 +35,7 @@ import useLocalDb, {
   getInitialMasterList,
   getInitialItems,
   getInitialFavorites,
+  RESERVED_CATEGORIES,
 } from './hooks/useLocalDb';
 import useDragAndDrop from './hooks/useDragAndDrop';
 import useSync, { SyncStatus } from './hooks/useSync';
@@ -40,6 +44,7 @@ import Sidebar from './components/Sidebar';
 import FavoritesBar from './components/FavoritesBar';
 import ShoppingItem from './components/ShoppingItem';
 import ConfirmModal from './components/ConfirmModal';
+import { useToast } from './components/Toast';
 
 // --- ESTILOS PERSONALIZADOS (CSS INLINE) ---
 const StyleTag = () => (
@@ -81,18 +86,24 @@ export default function App() {
     favorites, setFavorites,
     bacoMode, setBacoMode,
     // Propiedades de sync
-    syncInfo, updateSyncInfo, getDataForSync, applyServerData, getLastModified, dataVersion
+    syncInfo, updateSyncInfo, getDataForSync, applyServerData, getLastModified, dataVersion,
+    // P1: Error de almacenamiento
+    storageError
   } = useLocalDb();
 
-  // Hook de sincronización
+  // Hook de sincronización con callback para notificar cambios remotos
   const sync = useSync({
     syncInfo,
     updateSyncInfo,
     getDataForSync,
     applyServerData,
     getLastModified,
-    dataVersion
+    dataVersion,
+    onRemoteChanges: (message) => showToast(message, 'info') // P1: Notificar cambios remotos
   });
+
+  // Hook de toasts para notificaciones
+  const { showToast, ToastContainer } = useToast();
 
   // Inicializar app nativa (splash screen, status bar)
   useNativeInit();
@@ -104,6 +115,17 @@ export default function App() {
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [showRepeatModal, setShowRepeatModal] = useState(false);
+  const [showStorageWarning, setShowStorageWarning] = useState(false);
+
+  // P1: Mostrar advertencia cuando el almacenamiento está lleno
+  useEffect(() => {
+    if (storageError === 'storage_full') {
+      setShowStorageWarning(true);
+    }
+  }, [storageError]);
 
   const wrapperRef = useRef(null);
 
@@ -142,15 +164,17 @@ export default function App() {
       const newItems = [...items];
       newItems[existingItemIndex].quantity += 1;
       setItems(newItems);
+      showToast(`${newItemText} - cantidad actualizada a ${newItems[existingItemIndex].quantity}`, 'success');
     } else {
       const newItem = {
-        id: Date.now(),
+        id: crypto.randomUUID(), // P0: UUID en lugar de Date.now() para evitar colisiones
         text: newItemText.trim(),
         completed: false,
         category: selectedCategory,
         quantity: 1,
       };
       setItems([...items, newItem]);
+      showToast(`${newItemText.trim()} añadido a la lista`, 'success');
     }
     setNewItemText('');
     setSelectedCategory('Otros');
@@ -172,8 +196,26 @@ export default function App() {
     if (existing) {
       setItems(items.map((i) => (i.id === existing.id ? { ...i, quantity: (i.quantity || 1) + 1 } : i)));
     } else {
-      const category = categories[fav.category] ? fav.category : 'Otros';
-      setItems([...items, { id: Date.now(), text: fav.text, category, completed: false, quantity: 1 }]);
+      // P2: Si la categoría del favorito no existe, usar 'Otros' y actualizar el favorito
+      const categoryExists = categories[fav.category];
+      const category = categoryExists ? fav.category : 'Otros';
+      
+      // Actualizar el favorito si su categoría era huérfana
+      if (!categoryExists && fav.category !== 'Otros') {
+        setFavorites(favorites.map(f => 
+          f.text.toLowerCase() === fav.text.toLowerCase() 
+            ? { ...f, category: 'Otros' } 
+            : f
+        ));
+      }
+      
+      setItems([...items, { 
+        id: crypto.randomUUID(), // P0: UUID en lugar de Date.now()
+        text: fav.text, 
+        category, 
+        completed: false, 
+        quantity: 1 
+      }]);
     }
   };
 
@@ -183,11 +225,16 @@ export default function App() {
     .sort((a, b) => a.text.localeCompare(b.text, 'es', { sensitivity: 'base' }));
 
   const repeatCompletedItems = () => {
+    setShowRepeatModal(true);
+  };
+
+  const confirmRepeatCompleted = () => {
     setItems(prevItems => {
       const hasCompleted = prevItems.some(i => i.completed);
       if (!hasCompleted) return prevItems;
       return prevItems.map((i) => (i.completed ? { ...i, completed: false } : i));
     });
+    showToast('Items repuestos a la lista de compras', 'success');
   };
 
   const toggleItem = (id) => {
@@ -207,9 +254,17 @@ export default function App() {
   };
 
   const deleteItem = (id) => {
-    if (window.confirm('¿Borrar de la lista?')) {
-      setItems(items.filter((item) => item.id !== id));
-      if (expandedItemId === id) setExpandedItemId(null);
+    setItemToDelete(id);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteItem = () => {
+    if (itemToDelete) {
+      const itemName = items.find(i => i.id === itemToDelete)?.text;
+      setItems(items.filter((item) => item.id !== itemToDelete));
+      if (expandedItemId === itemToDelete) setExpandedItemId(null);
+      showToast(`${itemName} eliminado`, 'info');
+      setItemToDelete(null);
     }
   };
 
@@ -274,8 +329,8 @@ export default function App() {
           <h2
             className={`text-sm font-bold uppercase tracking-wider mb-2 px-1 flex items-center gap-2 ${catConfig.color.split(' ')[1]}`}
           >
-            <CatIcon className="w-4 h-4" />
-            {catName}
+            <CatIcon className="w-4 h-4" aria-hidden="true" />
+            <span>{catName}</span>
           </h2>
           <div className="space-y-2">
             {catItems.map((item) => (
@@ -336,24 +391,30 @@ export default function App() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMenuOpen(true)}
-              className="p-2 -ml-2 hover:bg-yellow-400/50 rounded-xl transition-colors text-yellow-900"
+              className="p-2 -ml-2 hover:bg-yellow-400/50 rounded-xl transition-colors text-yellow-900 focus:ring-2 focus:ring-yellow-500 focus:outline-none"
+              aria-label="Abrir menú de configuración"
             >
-              <Menu className="w-7 h-7" />
+              <Menu className="w-7 h-7" aria-hidden="true" />
             </button>
             <h1 className="text-xl font-bold flex items-center text-yellow-900 select-none">
-              <PiggyBank className="mr-2 w-7 h-7" strokeWidth={2} />
+              <PiggyBank className="mr-2 w-7 h-7" strokeWidth={2} aria-hidden="true" />
               CasiListo
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <div className="text-xs font-bold bg-yellow-100 px-3 py-1.5 rounded-full text-yellow-800 select-none">
+            <div 
+              className="text-xs font-bold bg-yellow-100 px-3 py-1.5 rounded-full text-yellow-800 select-none"
+              aria-label={`${itemsToBuy.length} ${itemsToBuy.length === 1 ? 'producto pendiente' : 'productos pendientes'}`}
+              role="status"
+            >
               {itemsToBuy.length}
             </div>
             <button
               onClick={() => setShowResetModal(true)}
-              className="p-2 bg-white/50 rounded-full text-yellow-900 hover:bg-white active:scale-95 transition-all"
+              className="p-2 bg-white/50 rounded-full text-yellow-900 hover:bg-white active:scale-95 transition-all focus:ring-2 focus:ring-yellow-500 focus:outline-none"
+              aria-label="Nueva semana - reiniciar lista"
             >
-              <RotateCcw className="w-5 h-5" />
+              <RotateCcw className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -374,8 +435,10 @@ export default function App() {
               type="text"
               value={newItemText}
               onChange={handleTextChange}
-              placeholder="¿Qué falta en casa?"
-              className="w-full p-3 pr-14 rounded-t-3xl rounded-b-2xl border-2 border-yellow-200 bg-white shadow-sm focus:border-yellow-400 focus:ring-0 focus:outline-none text-base placeholder:text-stone-400"
+              placeholder="Buscar o añadir producto..."
+              className="w-full p-3 pr-14 rounded-t-3xl rounded-b-2xl border-2 border-yellow-200 bg-white shadow-sm focus:border-yellow-400 focus:ring-2 focus:ring-yellow-200 focus:outline-none text-base placeholder:text-stone-400 transition-all"
+              aria-label="Nombre del producto"
+              autoComplete="off"
             />
             {showSuggestions && suggestions.length > 0 && (
               <div className="absolute top-full left-0 right-0 bg-white border border-yellow-200 rounded-b-3xl shadow-lg mt-1 max-h-48 overflow-y-auto z-50">
@@ -383,7 +446,9 @@ export default function App() {
                   <div
                     key={idx}
                     onClick={() => selectSuggestion(s)}
-                    className="p-3 hover:bg-yellow-50 cursor-pointer flex justify-between items-center text-stone-700 border-b border-stone-50 last:border-0"
+                    className="p-3 hover:bg-yellow-50 cursor-pointer flex justify-between items-center text-stone-700 border-b border-stone-50 last:border-0 active:bg-yellow-100"
+                    role="option"
+                    aria-selected="false"
                   >
                     <span>{s.name}</span>
                     <span className="text-xs text-stone-400 bg-stone-100 px-2 py-1 rounded-full">{s.category}</span>
@@ -394,23 +459,28 @@ export default function App() {
           </div>
 
           <div className="flex gap-2 mt-2">
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="flex-1 p-3 rounded-2xl border border-yellow-200 bg-white text-stone-600 text-sm focus:border-yellow-400 focus:outline-none appearance-none"
-            >
-              {Object.keys(categories).map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat}
-                </option>
-              ))}
-            </select>
+            <div className="relative flex-1">
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full p-3 pr-10 rounded-2xl border border-yellow-200 bg-white text-stone-600 text-sm focus:border-yellow-400 focus:ring-2 focus:ring-yellow-200 focus:outline-none appearance-none transition-all"
+                aria-label="Categoría del producto"
+              >
+                {Object.keys(categories).map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-400 pointer-events-none" aria-hidden="true" />
+            </div>
             <button
               type="submit"
               disabled={!newItemText.trim()}
-              className="bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-bold rounded-2xl px-6 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-sm active:scale-95"
+              className="bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-bold rounded-2xl px-6 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-sm active:scale-95 focus:ring-2 focus:ring-yellow-300 focus:outline-none"
+              aria-label="Añadir producto"
             >
-              <Plus className="w-6 h-6" />
+              <Plus className="w-6 h-6" aria-hidden="true" />
             </button>
           </div>
         </form>
@@ -494,6 +564,55 @@ export default function App() {
         iconColor="text-yellow-600"
         iconBg="bg-yellow-100"
       />
+
+      {/* MODAL ELIMINAR ITEM */}
+      <ConfirmModal
+        isOpen={showDeleteModal}
+        onClose={() => {
+          setShowDeleteModal(false);
+          setItemToDelete(null);
+        }}
+        onConfirm={confirmDeleteItem}
+        title="¿Eliminar producto?"
+        message={`"${items.find(i => i.id === itemToDelete)?.text || ''}" será eliminado de tu lista.`}
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        icon={Trash2}
+        iconColor="text-red-600"
+        iconBg="bg-red-100"
+        confirmColor="bg-red-500 hover:bg-red-600 text-white"
+      />
+
+      {/* MODAL REPONER COMPLETADOS */}
+      <ConfirmModal
+        isOpen={showRepeatModal}
+        onClose={() => setShowRepeatModal(false)}
+        onConfirm={confirmRepeatCompleted}
+        title="¿Reponer completados?"
+        message={`${itemsCompleted.length} productos volverán a la lista de compras pendientes.`}
+        confirmText="Reponer"
+        cancelText="Cancelar"
+        icon={RefreshCw}
+        iconColor="text-yellow-600"
+        iconBg="bg-yellow-100"
+      />
+
+      {/* P1: MODAL ADVERTENCIA ALMACENAMIENTO LLENO */}
+      <ConfirmModal
+        isOpen={showStorageWarning}
+        onClose={() => setShowStorageWarning(false)}
+        onConfirm={() => setShowStorageWarning(false)}
+        title="Almacenamiento lleno"
+        message="El almacenamiento local está lleno. Algunos cambios pueden no guardarse. Considera sincronizar tu cuenta o eliminar datos del navegador."
+        confirmText="Entendido"
+        cancelText=""
+        icon={AlertTriangle}
+        iconColor="text-orange-600"
+        iconBg="bg-orange-100"
+      />
+
+      {/* TOAST CONTAINER */}
+      <ToastContainer />
     </div>
   );
 }
@@ -504,11 +623,11 @@ export {
   DEFAULT_ITEMS,
   DEFAULT_CATEGORIES,
   DEFAULT_MASTER_LIST,
+  RESERVED_CATEGORIES,
   loadDb,
   getInitialCategories,
   getInitialMasterList,
   getInitialItems,
   getInitialFavorites,
-
 };
 

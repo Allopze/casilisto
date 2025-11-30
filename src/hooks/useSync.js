@@ -18,15 +18,18 @@ export const SyncStatus = {
   ERROR: 'error'                  // Error de sincronización
 };
 
-export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerData, getLastModified, dataVersion }) {
+export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerData, getLastModified, dataVersion, onRemoteChanges }) {
   const [status, setStatus] = useState(SyncStatus.DISCONNECTED);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [devices, setDevices] = useState([]);
   const [error, setError] = useState(null);
   const [lastSyncTime, setLastSyncTime] = useState(syncInfo?.lastSyncAt || 0);
+  const [isPageVisible, setIsPageVisible] = useState(!document.hidden);
   
   const syncInProgress = useRef(false);
   const syncTimeout = useRef(null);
+  const retryCount = useRef(0);
+  const maxRetries = 4; // 1s, 2s, 4s, 8s
 
   // Detectar cambios en conexión
   useEffect(() => {
@@ -54,6 +57,45 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
     };
   }, [syncInfo?.userCode]);
 
+  // P1: Page Visibility API para pausar polling en background y hacer flush
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const visible = !document.hidden;
+      setIsPageVisible(visible);
+      
+      if (!visible && syncInfo?.userCode && syncInfo?.pendingChanges) {
+        // App va a background con cambios pendientes - intentar sync inmediato
+        pushToServerImmediate();
+      } else if (visible && syncInfo?.userCode && isOnline) {
+        // App vuelve a foreground - pull para obtener cambios de otros dispositivos
+        pullFromServer();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [syncInfo?.userCode, syncInfo?.pendingChanges, isOnline]);
+
+  // P1: Flush en beforeunload para no perder cambios al cerrar
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (syncInfo?.userCode && syncInfo?.pendingChanges && isOnline) {
+        // Usar sendBeacon para envío asíncrono que sobrevive al cierre
+        const data = JSON.stringify({
+          code: syncInfo.userCode,
+          deviceId: syncInfo.deviceId,
+          deviceName: syncInfo.deviceName,
+          data: getDataForSync(),
+          localUpdatedAt: getLastModified()
+        });
+        navigator.sendBeacon(`${API_BASE}/api/sync/push`, new Blob([data], { type: 'application/json' }));
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [syncInfo, isOnline, getDataForSync, getLastModified]);
+
   // Actualizar estado inicial
   useEffect(() => {
     if (!syncInfo?.userCode) {
@@ -78,7 +120,7 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
     
     syncTimeout.current = setTimeout(() => {
       pushToServer();
-    }, 3000);
+    }, 1000); // Reducido de 3s a 1s para evitar pérdida de datos
 
     return () => {
       if (syncTimeout.current) {
@@ -88,15 +130,16 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
   }, [dataVersion, syncInfo?.userCode, isOnline]);
 
   // Polling cada 60 segundos para obtener cambios de otros dispositivos
+  // P1: Solo cuando la página está visible (Page Visibility API)
   useEffect(() => {
-    if (!syncInfo?.userCode || !isOnline) return;
+    if (!syncInfo?.userCode || !isOnline || !isPageVisible) return;
 
     const interval = setInterval(() => {
       pullFromServer();
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [syncInfo?.userCode, isOnline]);
+  }, [syncInfo?.userCode, isOnline, isPageVisible]);
 
   // Crear nueva cuenta
   const createAccount = useCallback(async () => {
@@ -121,8 +164,15 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
       const data = await response.json();
       
       if (data.success && data.code) {
-        // Primero subir datos locales al servidor ANTES de cualquier otra cosa
-        // Esto asegura que los datos locales no se pierdan
+        // CRÍTICO: Guardar userCode PRIMERO para evitar race condition
+        // Si el usuario cierra la app inmediatamente, no perderá la vinculación
+        updateSyncInfo({
+          userCode: data.code,
+          lastSyncAt: Date.now(),
+          pendingChanges: true  // Marcar como pendiente hasta que se suba
+        });
+
+        // Ahora subir datos locales al servidor
         const pushResponse = await fetch(`${API_BASE}/api/sync/push`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -136,15 +186,14 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
         });
 
         if (!pushResponse.ok) {
-          console.warn('Error subiendo datos iniciales, continuando...');
+          console.warn('Error subiendo datos iniciales, se reintentará...');
+        } else {
+          // Solo marcar como sincronizado si el push fue exitoso
+          updateSyncInfo({
+            lastSyncAt: Date.now(),
+            pendingChanges: false
+          });
         }
-
-        // Ahora guardar código localmente
-        updateSyncInfo({
-          userCode: data.code,
-          lastSyncAt: Date.now(),
-          pendingChanges: false
-        });
 
         // Registrar dispositivo (sin aplicar datos del servidor)
         await fetch(`${API_BASE}/api/user/login`, {
@@ -178,8 +227,10 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
       return false;
     }
 
-    if (!code || code.length !== 6) {
-      setError('Código inválido');
+    // Validar formato: solo mayúsculas y números permitidos en el generador
+    const codeRegex = /^[A-Z2-9]{6}$/;
+    if (!code || !codeRegex.test(code.toUpperCase().trim())) {
+      setError('Código inválido. Debe ser 6 caracteres (letras A-Z sin I,O y números 2-9)');
       return false;
     }
 
@@ -247,13 +298,30 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
     return response.json();
   };
 
-  // Enviar datos al servidor
+  // Enviar datos al servidor (con retry exponencial)
   const pushToServer = useCallback(async (codeOverride = null) => {
     const code = codeOverride || syncInfo?.userCode;
     if (!code || syncInProgress.current) return false;
 
     if (!isOnline) {
-      // Guardar en cola offline
+      // P0: Encolar en Service Worker para Background Sync
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'QUEUE_SYNC',
+          request: {
+            url: `${API_BASE}/api/sync/push`,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              deviceId: syncInfo.deviceId,
+              deviceName: syncInfo.deviceName,
+              data: getDataForSync(),
+              localUpdatedAt: getLastModified()
+            })
+          }
+        });
+      }
       updateSyncInfo({ pendingChanges: true });
       setStatus(SyncStatus.OFFLINE);
       return false;
@@ -284,6 +352,10 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
       if (result.conflict && result.serverData) {
         // El servidor tiene datos más recientes
         applyServerData(result.serverData);
+        // P1: Notificar al usuario de cambios remotos
+        if (onRemoteChanges) {
+          onRemoteChanges('Datos actualizados desde otro dispositivo');
+        }
       }
 
       updateSyncInfo({
@@ -294,16 +366,37 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
       setLastSyncTime(Date.now());
       setStatus(SyncStatus.ONLINE);
       setError(null);
+      retryCount.current = 0; // Reset retry count on success
       return true;
     } catch (err) {
       console.error('Error en push:', err);
       setError(err.message);
       setStatus(SyncStatus.ERROR);
+      
+      // P2: Retry con backoff exponencial
+      if (retryCount.current < maxRetries) {
+        const delay = Math.pow(2, retryCount.current) * 1000; // 1s, 2s, 4s, 8s
+        retryCount.current++;
+        setTimeout(() => {
+          syncInProgress.current = false;
+          pushToServer(codeOverride);
+        }, delay);
+      }
       return false;
     } finally {
       syncInProgress.current = false;
     }
-  }, [syncInfo, isOnline, getDataForSync, getLastModified, applyServerData, updateSyncInfo]);
+  }, [syncInfo, isOnline, getDataForSync, getLastModified, applyServerData, updateSyncInfo, onRemoteChanges]);
+
+  // Push inmediato sin debounce (para visibility change / beforeunload)
+  const pushToServerImmediate = useCallback(async () => {
+    if (!syncInfo?.userCode || !isOnline) return false;
+    if (syncTimeout.current) {
+      clearTimeout(syncTimeout.current);
+      syncTimeout.current = null;
+    }
+    return pushToServer();
+  }, [syncInfo?.userCode, isOnline, pushToServer]);
 
   // Obtener datos del servidor
   const pullFromServer = useCallback(async () => {
@@ -334,6 +427,10 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
           lastSyncAt: Date.now(),
           pendingChanges: false
         });
+        // P1: Notificar al usuario que hay cambios de otro dispositivo
+        if (onRemoteChanges) {
+          onRemoteChanges('Lista actualizada desde otro dispositivo');
+        }
       }
 
       setStatus(SyncStatus.ONLINE);
@@ -345,7 +442,7 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
     } finally {
       syncInProgress.current = false;
     }
-  }, [syncInfo, isOnline, lastSyncTime, applyServerData, updateSyncInfo]);
+  }, [syncInfo, isOnline, lastSyncTime, applyServerData, updateSyncInfo, onRemoteChanges]);
 
   // Sincronizar ahora (push + pull)
   const syncNow = useCallback(async () => {
@@ -436,6 +533,16 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
     setError(null);
   }, [updateSyncInfo]);
 
+  // P2: Actualizar nombre del dispositivo
+  const updateDeviceName = useCallback((newName) => {
+    if (!newName || !newName.trim()) return;
+    updateSyncInfo({ deviceName: newName.trim() });
+    // Actualizar en servidor si está vinculado
+    if (syncInfo?.userCode && isOnline) {
+      fetchDevices(); // Refrescar lista con nuevo nombre
+    }
+  }, [syncInfo?.userCode, isOnline, updateSyncInfo, fetchDevices]);
+
   // Cargar dispositivos al montar si hay cuenta
   useEffect(() => {
     if (syncInfo?.userCode && isOnline) {
@@ -459,10 +566,12 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
     linkDevice,
     syncNow,
     pushToServer,
+    pushToServerImmediate,
     pullFromServer,
     fetchDevices,
     unlinkDevice,
     disconnect,
+    updateDeviceName,
     clearError: () => setError(null)
   };
 }

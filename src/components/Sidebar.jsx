@@ -1,7 +1,7 @@
 /**
  * Componente Sidebar para configuración (categorías, productos master, sincronización)
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus,
   Trash2,
@@ -22,8 +22,12 @@ import {
   Loader2,
   AlertCircle,
   Wine,
+  Info,
+  Edit3,
 } from 'lucide-react';
 import { SyncStatus } from '../hooks/useSync';
+import { RESERVED_CATEGORIES } from '../hooks/useLocalDb';
+import ConfirmModal from './ConfirmModal';
 
 const COLOR_PRESETS = [
   { name: 'Verde', bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200' },
@@ -62,11 +66,51 @@ export default function Sidebar({
   const [showLinkForm, setShowLinkForm] = useState(false);
   const [deviceToUnlink, setDeviceToUnlink] = useState(null);
   const [showDisconnectModal, setShowDisconnectModal] = useState(false);
+  
+  // Estados para modales de confirmación
+  const [showDuplicateCatModal, setShowDuplicateCatModal] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState(null);
+  const [showCantDeleteOtrosModal, setShowCantDeleteOtrosModal] = useState(false);
+  const [showDuplicateProductModal, setShowDuplicateProductModal] = useState(false);
+  const [productToDelete, setProductToDelete] = useState(null);
+  const [showReservedCatModal, setShowReservedCatModal] = useState(false);
+  
+  // P2: Estado para renombrar dispositivo
+  const [editingDeviceName, setEditingDeviceName] = useState(false);
+  const [newDeviceName, setNewDeviceName] = useState('');
+  
+  // Ref para scroll indicator
+  const scrollContainerRef = useRef(null);
+  const [showScrollIndicator, setShowScrollIndicator] = useState(false);
+
+  // Detectar si hay más contenido para scroll
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    
+    const checkScroll = () => {
+      const hasMoreContent = container.scrollHeight > container.clientHeight;
+      const isNotAtBottom = container.scrollTop < container.scrollHeight - container.clientHeight - 20;
+      setShowScrollIndicator(hasMoreContent && isNotAtBottom);
+    };
+    
+    checkScroll();
+    container.addEventListener('scroll', checkScroll);
+    return () => container.removeEventListener('scroll', checkScroll);
+  }, [isOpen]);
 
   const addCategory = () => {
     if (!newCatName.trim()) return;
-    if (categories[newCatName]) {
-      alert('Ya existe una categoría con ese nombre');
+    const trimmedName = newCatName.trim();
+    
+    // P2: Verificar si es una categoría reservada
+    if (RESERVED_CATEGORIES.some(rc => rc.toLowerCase() === trimmedName.toLowerCase())) {
+      setShowReservedCatModal(true);
+      return;
+    }
+    
+    if (categories[trimmedName]) {
+      setShowDuplicateCatModal(true);
       return;
     }
     const newCategoryData = {
@@ -74,21 +118,26 @@ export default function Sidebar({
       border: newCatColor.border,
       iconName: 'Tag',
     };
-    setCategories({ ...categories, [newCatName.trim()]: newCategoryData });
+    setCategories({ ...categories, [trimmedName]: newCategoryData });
     setNewCatName('');
   };
 
   const deleteCategory = (catName) => {
     if (catName === 'Otros') {
-      alert('No puedes borrar la categoría "Otros"');
+      setShowCantDeleteOtrosModal(true);
       return;
     }
-    if (window.confirm(`¿Borrar categoría "${catName}"? Los productos pasarán a "Otros".`)) {
+    setCategoryToDelete(catName);
+  };
+
+  const confirmDeleteCategory = () => {
+    if (categoryToDelete) {
       const newCats = { ...categories };
-      delete newCats[catName];
+      delete newCats[categoryToDelete];
       setCategories(newCats);
-      setMasterList(masterList.map((item) => (item.category === catName ? { ...item, category: 'Otros' } : item)));
-      setItems(items.map((item) => (item.category === catName ? { ...item, category: 'Otros' } : item)));
+      setMasterList(masterList.map((item) => (item.category === categoryToDelete ? { ...item, category: 'Otros' } : item)));
+      setItems(items.map((item) => (item.category === categoryToDelete ? { ...item, category: 'Otros' } : item)));
+      setCategoryToDelete(null);
     }
   };
 
@@ -97,7 +146,7 @@ export default function Sidebar({
     const itemName = newMasterItemText.trim();
     const exists = masterList.some((item) => item.name.toLowerCase() === itemName.toLowerCase());
     if (exists) {
-      alert('Este producto ya existe en la lista maestra.');
+      setShowDuplicateProductModal(true);
       return;
     }
     // Añadir a la lista maestra (sugerencias)
@@ -121,8 +170,13 @@ export default function Sidebar({
   };
 
   const removeMasterItem = (itemName) => {
-    if (window.confirm(`¿Borrar "${itemName}" de la lista de sugerencias?`)) {
-      setMasterList(masterList.filter((item) => item.name !== itemName));
+    setProductToDelete(itemName);
+  };
+
+  const confirmRemoveMasterItem = () => {
+    if (productToDelete) {
+      setMasterList(masterList.filter((item) => item.name !== productToDelete));
+      setProductToDelete(null);
     }
   };
 
@@ -179,17 +233,17 @@ export default function Sidebar({
   const getSyncStatusDisplay = () => {
     switch (sync.status) {
       case SyncStatus.ONLINE:
-        return { icon: Cloud, color: 'text-green-600', bg: 'bg-green-100', text: 'Sincronizado' };
+        return { icon: Cloud, color: 'text-green-600', bg: 'bg-green-100', text: 'Sincronizado', helpText: 'Tus datos están actualizados' };
       case SyncStatus.SYNCING:
-        return { icon: Loader2, color: 'text-blue-600', bg: 'bg-blue-100', text: 'Sincronizando...', spin: true };
+        return { icon: Loader2, color: 'text-blue-600', bg: 'bg-blue-100', text: 'Sincronizando...', spin: true, helpText: 'Enviando cambios...' };
       case SyncStatus.OFFLINE:
-        return { icon: WifiOff, color: 'text-orange-600', bg: 'bg-orange-100', text: 'Sin conexión' };
+        return { icon: WifiOff, color: 'text-orange-600', bg: 'bg-orange-100', text: 'Sin conexión', helpText: 'Los cambios se sincronizarán al reconectar' };
       case SyncStatus.PENDING:
-        return { icon: RefreshCw, color: 'text-yellow-600', bg: 'bg-yellow-100', text: 'Cambios pendientes' };
+        return { icon: RefreshCw, color: 'text-yellow-600', bg: 'bg-yellow-100', text: 'Cambios pendientes', helpText: 'Se sincronizará en unos segundos...' };
       case SyncStatus.ERROR:
-        return { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100', text: 'Error de sync' };
+        return { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100', text: 'Error de sync', helpText: 'Intenta sincronizar manualmente' };
       default:
-        return { icon: CloudOff, color: 'text-stone-400', bg: 'bg-stone-100', text: 'No vinculado' };
+        return { icon: CloudOff, color: 'text-stone-400', bg: 'bg-stone-100', text: 'No vinculado', helpText: '' };
     }
   };
 
@@ -206,24 +260,32 @@ export default function Sidebar({
       >
         <div className="p-6 bg-yellow-300 flex items-center justify-between">
           <h2 className="text-xl font-bold text-yellow-900 flex items-center gap-2">
-            <Settings className="w-6 h-6" /> Configuración
+            <Settings className="w-6 h-6" aria-hidden="true" /> Configuración
           </h2>
-          <button onClick={onClose} className="p-3 bg-yellow-400/50 hover:bg-yellow-400 rounded-full text-yellow-900">
-            <X className="w-7 h-7" />
+          <button 
+            onClick={onClose} 
+            className="p-3 bg-yellow-400/50 hover:bg-yellow-400 rounded-full text-yellow-900 focus:ring-2 focus:ring-yellow-600 focus:outline-none"
+            aria-label="Cerrar configuración"
+          >
+            <X className="w-7 h-7" aria-hidden="true" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-8">
+        <div className="flex-1 overflow-y-auto p-4 space-y-8 relative" ref={scrollContainerRef}>
+          {/* Scroll indicator */}
+          {showScrollIndicator && (
+            <div className="sticky bottom-0 left-0 right-0 h-12 pointer-events-none bg-gradient-to-t from-white to-transparent z-10" />
+          )}
           {/* Modo Baco Toggle */}
-          <div className="bg-purple-50 p-5 rounded-3xl border border-purple-200 shadow-sm">
+          <div className="bg-purple-50 p-5 rounded-2xl border border-purple-200 shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
-                  <Wine className="w-5 h-5 text-purple-600" />
+                  <Wine className="w-5 h-5 text-purple-600" aria-hidden="true" />
                 </div>
                 <div>
                   <h3 className="font-bold text-lg text-purple-800">Modo Baco</h3>
-                  <p className="text-xs text-purple-600">¿Ya compraste vino?</p>
+                  <p className="text-xs text-purple-600">{bacoMode ? 'Vinos siempre visible arriba' : 'Activa para priorizar vinos'}</p>
                 </div>
               </div>
               <button
@@ -280,25 +342,33 @@ export default function Sidebar({
           </div>
 
           {/* Añadir Categoría */}
-          <div className="bg-yellow-50 p-5 rounded-3xl border border-yellow-200 shadow-sm">
+          <div className="bg-yellow-50 p-5 rounded-2xl border border-yellow-200 shadow-sm">
             <h3 className="font-bold text-lg text-yellow-800 mb-4 flex items-center gap-2">
-              <Plus className="w-5 h-5" /> Nueva Categoría
+              <Plus className="w-5 h-5" aria-hidden="true" /> Nueva Categoría
             </h3>
             <input
               type="text"
               placeholder="Nombre (ej. Bebé)"
               value={newCatName}
               onChange={(e) => setNewCatName(e.target.value)}
-              className="w-full p-3 mb-4 rounded-xl border border-yellow-200 text-base"
+              className="w-full p-3 mb-4 rounded-xl border border-yellow-200 text-base focus:border-yellow-400 focus:ring-2 focus:ring-yellow-200 focus:outline-none transition-all"
+              aria-label="Nombre de la nueva categoría"
             />
             <div className="relative">
-              <div className="flex gap-4 overflow-x-auto py-3 px-1 mb-2 no-scrollbar scroll-mask pr-6">
+              <p className="text-xs text-stone-500 mb-2">Elige un color:</p>
+              <div 
+                className="flex gap-4 overflow-x-auto py-3 px-1 mb-2 no-scrollbar scroll-mask pr-6"
+                role="radiogroup"
+                aria-label="Color de la categoría"
+              >
                 {COLOR_PRESETS.map((preset, idx) => (
                   <button
                     key={idx}
                     onClick={() => setNewCatColor(preset)}
-                    className={`w-10 h-10 rounded-full flex-shrink-0 border-2 shadow-sm ${preset.bg} ${newCatColor.name === preset.name ? 'border-stone-800 scale-110 ring-2 ring-yellow-400 ring-offset-2' : 'border-transparent'}`}
-                    title={preset.name}
+                    className={`w-10 h-10 rounded-full flex-shrink-0 border-2 shadow-sm ${preset.bg} ${newCatColor.name === preset.name ? 'border-stone-800 scale-110 ring-2 ring-yellow-400 ring-offset-2' : 'border-transparent'} focus:outline-none focus:ring-2 focus:ring-yellow-400`}
+                    aria-label={`Color ${preset.name}`}
+                    aria-pressed={newCatColor.name === preset.name}
+                    role="radio"
                   />
                 ))}
                 <div className="w-4 flex-shrink-0"></div>
@@ -307,7 +377,7 @@ export default function Sidebar({
             <button
               onClick={addCategory}
               disabled={!newCatName}
-              className="w-full py-3 bg-yellow-400 text-yellow-900 font-bold rounded-2xl text-base disabled:opacity-50 mt-2 shadow-sm active:scale-95 transition-transform"
+              className="w-full py-3 bg-yellow-400 text-yellow-900 font-bold rounded-2xl text-base disabled:opacity-50 mt-2 shadow-sm active:scale-95 transition-transform focus:ring-2 focus:ring-yellow-500 focus:outline-none"
             >
               Crear Categoría
             </button>
@@ -373,13 +443,15 @@ export default function Sidebar({
                             placeholder="Añadir producto..."
                             value={newMasterItemText}
                             onChange={(e) => setNewMasterItemText(e.target.value)}
-                            className="flex-1 p-3 rounded-xl border border-stone-200 text-base shadow-sm"
+                            className="flex-1 p-3 rounded-xl border border-stone-200 text-base shadow-sm focus:border-yellow-400 focus:ring-2 focus:ring-yellow-200 focus:outline-none transition-all"
+                            aria-label={`Añadir producto a ${catName}`}
                           />
                           <button
                             onClick={() => addMasterItemToCat(catName)}
-                            className="bg-stone-200 p-3 rounded-xl text-stone-600 hover:bg-stone-300 active:scale-95"
+                            className="bg-stone-200 p-3 rounded-xl text-stone-600 hover:bg-stone-300 active:scale-95 focus:ring-2 focus:ring-stone-400 focus:outline-none"
+                            aria-label="Añadir producto"
                           >
-                            <Plus className="w-6 h-6" />
+                            <Plus className="w-6 h-6" aria-hidden="true" />
                           </button>
                         </div>
                         <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -420,18 +492,26 @@ export default function Sidebar({
 
             {/* Estado actual */}
             {sync && (
-              <div className={`flex items-center gap-3 p-3 rounded-xl mb-4 ${getSyncStatusDisplay().bg}`}>
-                {(() => {
-                  const StatusIcon = getSyncStatusDisplay().icon;
-                  return (
-                    <StatusIcon 
-                      className={`w-5 h-5 ${getSyncStatusDisplay().color} ${getSyncStatusDisplay().spin ? 'animate-spin' : ''}`} 
-                    />
-                  );
-                })()}
-                <span className={`font-medium ${getSyncStatusDisplay().color}`}>
-                  {getSyncStatusDisplay().text}
-                </span>
+              <div className={`p-3 rounded-xl mb-4 ${getSyncStatusDisplay().bg}`}>
+                <div className="flex items-center gap-3">
+                  {(() => {
+                    const StatusIcon = getSyncStatusDisplay().icon;
+                    return (
+                      <StatusIcon 
+                        className={`w-5 h-5 ${getSyncStatusDisplay().color} ${getSyncStatusDisplay().spin ? 'animate-spin' : ''}`} 
+                        aria-hidden="true"
+                      />
+                    );
+                  })()}
+                  <span className={`font-medium ${getSyncStatusDisplay().color}`}>
+                    {getSyncStatusDisplay().text}
+                  </span>
+                </div>
+                {getSyncStatusDisplay().helpText && (
+                  <p className={`text-xs mt-1 ml-8 ${getSyncStatusDisplay().color} opacity-75`}>
+                    {getSyncStatusDisplay().helpText}
+                  </p>
+                )}
               </div>
             )}
 
@@ -504,8 +584,13 @@ export default function Sidebar({
                       placeholder="Código de 6 caracteres"
                       value={linkCode}
                       onChange={(e) => setLinkCode(e.target.value.toUpperCase().slice(0, 6))}
-                      className="w-full p-3 rounded-xl border border-stone-200 text-center text-2xl font-mono tracking-widest uppercase"
+                      className="w-full p-3 rounded-xl border border-stone-200 text-center text-2xl font-mono tracking-widest uppercase focus:border-yellow-400 focus:ring-2 focus:ring-yellow-200 focus:outline-none transition-all"
                       maxLength={6}
+                      inputMode="text"
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      spellCheck="false"
+                      aria-label="Código de sincronización"
                     />
                     <div className="flex gap-2">
                       <button
@@ -597,12 +682,57 @@ export default function Sidebar({
                         }`}
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-stone-700 truncate">
-                            {device.name}
-                            {device.id === sync.deviceId && (
-                              <span className="ml-2 text-xs text-yellow-600 font-normal">(Este dispositivo)</span>
-                            )}
-                          </p>
+                          {/* P2: Editar nombre de dispositivo actual */}
+                          {device.id === sync.deviceId && editingDeviceName ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={newDeviceName}
+                                onChange={(e) => setNewDeviceName(e.target.value)}
+                                className="flex-1 p-1 text-sm border border-yellow-300 rounded focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && newDeviceName.trim()) {
+                                    // Actualizar nombre localmente
+                                    sync.updateDeviceName && sync.updateDeviceName(newDeviceName.trim());
+                                    setEditingDeviceName(false);
+                                  } else if (e.key === 'Escape') {
+                                    setEditingDeviceName(false);
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  if (newDeviceName.trim()) {
+                                    sync.updateDeviceName && sync.updateDeviceName(newDeviceName.trim());
+                                  }
+                                  setEditingDeviceName(false);
+                                }}
+                                className="p-1 text-green-600 hover:bg-green-50 rounded"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="font-medium text-stone-700 truncate flex items-center">
+                              {device.name}
+                              {device.id === sync.deviceId && (
+                                <>
+                                  <span className="ml-2 text-xs text-yellow-600 font-normal">(Este dispositivo)</span>
+                                  <button
+                                    onClick={() => {
+                                      setNewDeviceName(device.name);
+                                      setEditingDeviceName(true);
+                                    }}
+                                    className="ml-2 p-1 text-stone-400 hover:text-stone-600 rounded"
+                                    title="Renombrar dispositivo"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
+                            </p>
+                          )}
                           <p className="text-xs text-stone-400">
                             {formatLastSeen(device.last_seen)}
                           </p>
@@ -703,6 +833,92 @@ export default function Sidebar({
               </div>
             </div>
           )}
+
+          {/* Modal: Categoría duplicada */}
+          <ConfirmModal
+            isOpen={showDuplicateCatModal}
+            onClose={() => setShowDuplicateCatModal(false)}
+            onConfirm={() => setShowDuplicateCatModal(false)}
+            title="Categoría existente"
+            message="Ya existe una categoría con ese nombre. Por favor, elige otro nombre."
+            confirmText="Entendido"
+            cancelText=""
+            icon={Info}
+            iconColor="text-yellow-600"
+            iconBg="bg-yellow-100"
+          />
+
+          {/* Modal: No se puede borrar Otros */}
+          <ConfirmModal
+            isOpen={showCantDeleteOtrosModal}
+            onClose={() => setShowCantDeleteOtrosModal(false)}
+            onConfirm={() => setShowCantDeleteOtrosModal(false)}
+            title="Categoría protegida"
+            message='La categoría "Otros" no se puede eliminar porque es la categoría por defecto.'
+            confirmText="Entendido"
+            cancelText=""
+            icon={Info}
+            iconColor="text-blue-600"
+            iconBg="bg-blue-100"
+          />
+
+          {/* Modal: Confirmar eliminar categoría */}
+          <ConfirmModal
+            isOpen={!!categoryToDelete}
+            onClose={() => setCategoryToDelete(null)}
+            onConfirm={confirmDeleteCategory}
+            title="¿Eliminar categoría?"
+            message={`"${categoryToDelete}" será eliminada y sus productos pasarán a "Otros".`}
+            confirmText="Eliminar"
+            cancelText="Cancelar"
+            icon={Trash2}
+            iconColor="text-red-600"
+            iconBg="bg-red-100"
+            confirmColor="bg-red-500 hover:bg-red-600 text-white"
+          />
+
+          {/* Modal: Producto duplicado */}
+          <ConfirmModal
+            isOpen={showDuplicateProductModal}
+            onClose={() => setShowDuplicateProductModal(false)}
+            onConfirm={() => setShowDuplicateProductModal(false)}
+            title="Producto existente"
+            message="Este producto ya existe en la lista de sugerencias."
+            confirmText="Entendido"
+            cancelText=""
+            icon={Info}
+            iconColor="text-yellow-600"
+            iconBg="bg-yellow-100"
+          />
+
+          {/* Modal: Confirmar eliminar producto */}
+          <ConfirmModal
+            isOpen={!!productToDelete}
+            onClose={() => setProductToDelete(null)}
+            onConfirm={confirmRemoveMasterItem}
+            title="¿Eliminar producto?"
+            message={`"${productToDelete}" será eliminado de la lista de sugerencias.`}
+            confirmText="Eliminar"
+            cancelText="Cancelar"
+            icon={Trash2}
+            iconColor="text-red-600"
+            iconBg="bg-red-100"
+            confirmColor="bg-red-500 hover:bg-red-600 text-white"
+          />
+
+          {/* P2: Modal: Categoría reservada */}
+          <ConfirmModal
+            isOpen={showReservedCatModal}
+            onClose={() => setShowReservedCatModal(false)}
+            onConfirm={() => setShowReservedCatModal(false)}
+            title="Nombre reservado"
+            message={`"${newCatName}" es un nombre reservado del sistema. Por favor, elige otro nombre.`}
+            confirmText="Entendido"
+            cancelText=""
+            icon={Info}
+            iconColor="text-orange-600"
+            iconBg="bg-orange-100"
+          />
         </div>
 
         {/* Footer fijo con código de usuario */}

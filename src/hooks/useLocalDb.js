@@ -8,6 +8,33 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 export const DB_KEY = 'casilisto_db_v1';
 export const SYNC_KEY = 'casilisto_sync_v1';
 
+// P2: Categorías reservadas que no se pueden crear manualmente
+export const RESERVED_CATEGORIES = ['Otros', 'Vinos'];
+
+// P2: Schema de validación para items
+function validateItem(item) {
+  return item &&
+    typeof item.id !== 'undefined' &&
+    typeof item.text === 'string' &&
+    typeof item.category === 'string' &&
+    typeof item.completed === 'boolean' &&
+    typeof item.quantity === 'number';
+}
+
+// P2: Validar array de items
+function validateItemArray(items) {
+  if (!Array.isArray(items)) return false;
+  return items.every(validateItem);
+}
+
+// P2: Validar categorías
+function validateCategories(cats) {
+  if (!cats || typeof cats !== 'object') return false;
+  return Object.values(cats).every(cat => 
+    cat && typeof cat.color === 'string' && typeof cat.iconName === 'string'
+  );
+}
+
 // Generar UUID único para el dispositivo
 function generateDeviceId() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -426,7 +453,12 @@ export function getInitialCategories() {
   if (db && db.categories) return normalizeCategoryMap(db.categories);
   try {
     const saved = localStorage.getItem('shoppingListCategories');
-    return normalizeCategoryMap(saved ? JSON.parse(saved) : DEFAULT_CATEGORIES);
+    const result = normalizeCategoryMap(saved ? JSON.parse(saved) : DEFAULT_CATEGORIES);
+    // P3: Limpiar clave legacy después de migración exitosa
+    if (saved) {
+      try { localStorage.removeItem('shoppingListCategories'); } catch {}
+    }
+    return result;
   } catch {
     return normalizeCategoryMap(DEFAULT_CATEGORIES);
   }
@@ -437,7 +469,12 @@ export function getInitialMasterList() {
   if (db && db.masterList) return normalizeItemList(db.masterList);
   try {
     const saved = localStorage.getItem('shoppingListMaster');
-    return normalizeItemList(saved ? JSON.parse(saved) : DEFAULT_MASTER_LIST);
+    const result = normalizeItemList(saved ? JSON.parse(saved) : DEFAULT_MASTER_LIST);
+    // P3: Limpiar clave legacy después de migración exitosa
+    if (saved) {
+      try { localStorage.removeItem('shoppingListMaster'); } catch {}
+    }
+    return result;
   } catch {
     return normalizeItemList(DEFAULT_MASTER_LIST);
   }
@@ -448,7 +485,12 @@ export function getInitialItems() {
   if (db && db.items) return normalizeItemList(db.items);
   try {
     const savedItems = localStorage.getItem('shoppingListV5');
-    if (savedItems) return normalizeItemList(JSON.parse(savedItems));
+    if (savedItems) {
+      const result = normalizeItemList(JSON.parse(savedItems));
+      // P3: Limpiar clave legacy después de migración exitosa
+      try { localStorage.removeItem('shoppingListV5'); } catch {}
+      return result;
+    }
   } catch {
     // ignore
   }
@@ -486,6 +528,9 @@ export function useLocalDb() {
     }
   });
 
+  // Estado para error de almacenamiento
+  const [storageError, setStorageError] = useState(null);
+
   // Persistir Modo Baco
   useEffect(() => {
     try {
@@ -496,6 +541,7 @@ export function useLocalDb() {
   }, [bacoMode]);
 
   // Persistir cambios en localStorage
+  // P1: Detectar QuotaExceededError y notificar
   useEffect(() => {
     if (typeof localStorage === 'undefined') return;
     try {
@@ -508,6 +554,7 @@ export function useLocalDb() {
         lastModified: Date.now()
       };
       localStorage.setItem(DB_KEY, JSON.stringify(payload));
+      setStorageError(null); // Limpiar error si guardado fue exitoso
       
       // Marcar que hay cambios pendientes si está vinculado
       // Usamos setSyncInfo con callback para evitar stale closure
@@ -521,6 +568,10 @@ export function useLocalDb() {
       });
     } catch (e) {
       console.error('Error guardando base de datos local', e);
+      // P1: Detectar QuotaExceededError
+      if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
+        setStorageError('storage_full');
+      }
     }
   }, [items, categories, masterList, favorites, bacoMode]);
 
@@ -544,14 +595,27 @@ export function useLocalDb() {
 
   // Función para aplicar datos del servidor
   // IMPORTANTE: Nunca sobrescribir con datos vacíos
+  // P2: Validar estructura de datos antes de aplicar
   const applyServerData = useCallback((serverData) => {
-    // Solo aplicar items si hay al menos uno
+    // P2: Solo aplicar items si hay al menos uno Y la estructura es válida
     if (serverData.items && Array.isArray(serverData.items) && serverData.items.length > 0) {
-      setItems(normalizeItemList(serverData.items));
+      const normalizedItems = normalizeItemList(serverData.items);
+      // Validar que al menos algunos items tienen la estructura correcta
+      const validItems = normalizedItems.filter(item => 
+        item.id && item.text && item.category
+      );
+      if (validItems.length > 0) {
+        setItems(validItems);
+      }
     }
-    // Solo aplicar categories si hay al menos una
+    // P2: Solo aplicar categories si hay al menos una Y la estructura es válida
     if (serverData.categories && typeof serverData.categories === 'object' && Object.keys(serverData.categories).length > 0) {
-      setCategories(normalizeCategoryMap(serverData.categories));
+      const normalizedCats = normalizeCategoryMap(serverData.categories);
+      // Verificar que al menos una categoría tiene la estructura correcta
+      const hasValidCats = Object.values(normalizedCats).some(cat => cat && cat.color);
+      if (hasValidCats) {
+        setCategories(normalizedCats);
+      }
     }
     // Solo aplicar masterList si hay al menos uno
     if (serverData.masterList && Array.isArray(serverData.masterList) && serverData.masterList.length > 0) {
@@ -594,6 +658,8 @@ export function useLocalDb() {
     applyServerData,
     getLastModified,
     dataVersion,
+    // P1: Error de almacenamiento
+    storageError,
   };
 }
 
