@@ -39,7 +39,7 @@ import useLocalDb, {
 } from './hooks/useLocalDb';
 import useDragAndDrop from './hooks/useDragAndDrop';
 import useSync, { SyncStatus } from './hooks/useSync';
-import { useNativeInit } from './hooks/useNative';
+import useNative, { useNativeInit } from './hooks/useNative';
 import Sidebar from './components/Sidebar';
 import FavoritesBar from './components/FavoritesBar';
 import ShoppingItem from './components/ShoppingItem';
@@ -107,6 +107,9 @@ export default function App() {
 
   // Inicializar app nativa (splash screen, status bar)
   useNativeInit();
+  
+  // Hook para vibración
+  const { vibrate } = useNative();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [expandedItemId, setExpandedItemId] = useState(null);
@@ -131,6 +134,7 @@ export default function App() {
 
   const {
     draggingId,
+    dragOverIndex,
     dragOverlay,
     onDragStart,
     onDragEnter,
@@ -238,6 +242,8 @@ export default function App() {
   };
 
   const toggleItem = (id) => {
+    // Vibración al marcar/desmarcar
+    vibrate('light');
     setItems(items.map((item) => (item.id === id ? { ...item, completed: !item.completed } : item)));
   };
 
@@ -314,10 +320,10 @@ export default function App() {
     return catsToRender.map((catName) => {
       if (!categories[catName] && catName !== 'Otros') return null;
 
+      // No ordenar alfabéticamente para permitir reordenamiento manual
       const catItems = items
         .map((item, originalIndex) => ({ ...item, originalIndex }))
-        .filter((item) => !item.completed && item.category === catName)
-        .sort((a, b) => a.text.localeCompare(b.text, 'es', { sensitivity: 'base' }));
+        .filter((item) => !item.completed && item.category === catName);
 
       if (catItems.length === 0) return null;
 
@@ -339,6 +345,7 @@ export default function App() {
                 item={item}
                 isExpanded={expandedItemId === item.id}
                 isDragging={draggingId === item.id}
+                isDragOver={draggingId && draggingId !== item.id && dragOverIndex === item.originalIndex}
                 categories={categories}
                 isFavorite={isFavorite(item.text)}
                 bacoMode={bacoMode}

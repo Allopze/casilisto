@@ -30,6 +30,8 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
   const syncTimeout = useRef(null);
   const retryCount = useRef(0);
   const maxRetries = 4; // 1s, 2s, 4s, 8s
+  const lastPushTime = useRef(0); // Timestamp del último push exitoso
+  const ignoreNextPull = useRef(false); // Flag para ignorar pull inmediatamente después de push
 
   // Detectar cambios en conexión
   useEffect(() => {
@@ -110,17 +112,22 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
   }, [syncInfo?.userCode, syncInfo?.pendingChanges, isOnline]);
 
   // Auto-sync con debounce cuando hay cambios
+  // IMPORTANTE: No disparar si ya estamos sincronizando para evitar ciclos
   useEffect(() => {
     if (!syncInfo?.userCode || !isOnline) return;
+    if (syncInProgress.current) return; // Evitar ciclos
     
-    // Debounce: esperar 3 segundos después del último cambio
+    // Debounce: esperar 1 segundo después del último cambio
     if (syncTimeout.current) {
       clearTimeout(syncTimeout.current);
     }
     
     syncTimeout.current = setTimeout(() => {
-      pushToServer();
-    }, 1000); // Reducido de 3s a 1s para evitar pérdida de datos
+      // Doble verificación antes de sincronizar
+      if (!syncInProgress.current) {
+        pushToServer();
+      }
+    }, 1000);
 
     return () => {
       if (syncTimeout.current) {
@@ -350,7 +357,7 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
       const result = await response.json();
 
       if (result.conflict && result.serverData) {
-        // El servidor tiene datos más recientes
+        // El servidor tiene datos más recientes de OTRO dispositivo
         applyServerData(result.serverData);
         // P1: Notificar al usuario de cambios remotos
         if (onRemoteChanges) {
@@ -358,12 +365,17 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
         }
       }
 
+      // Marcar timestamp de este push y que el siguiente pull no es un cambio remoto
+      const now = Date.now();
+      lastPushTime.current = now;
+      ignoreNextPull.current = true;
+      
       updateSyncInfo({
-        lastSyncAt: Date.now(),
+        lastSyncAt: now,
         pendingChanges: false
       });
 
-      setLastSyncTime(Date.now());
+      setLastSyncTime(now);
       setStatus(SyncStatus.ONLINE);
       setError(null);
       retryCount.current = 0; // Reset retry count on success
@@ -421,16 +433,27 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
       const result = await response.json();
 
       if (result.hasChanges && result.data) {
-        applyServerData(result.data);
+        // Verificar si este cambio es probablemente nuestro propio push reciente
+        const timeSinceLastPush = Date.now() - lastPushTime.current;
+        const isLikelyOwnChange = timeSinceLastPush < 5000 || ignoreNextPull.current;
+        
+        // Solo aplicar datos si NO es probablemente nuestro propio cambio
+        // Esto evita el ciclo de re-renders
+        if (!isLikelyOwnChange) {
+          applyServerData(result.data);
+          if (onRemoteChanges) {
+            onRemoteChanges('Lista actualizada desde otro dispositivo');
+          }
+        }
+        
         setLastSyncTime(result.serverUpdatedAt);
         updateSyncInfo({
           lastSyncAt: Date.now(),
           pendingChanges: false
         });
-        // P1: Notificar al usuario que hay cambios de otro dispositivo
-        if (onRemoteChanges) {
-          onRemoteChanges('Lista actualizada desde otro dispositivo');
-        }
+        
+        // Resetear flag después del primer pull
+        ignoreNextPull.current = false;
       }
 
       setStatus(SyncStatus.ONLINE);
@@ -450,6 +473,12 @@ export function useSync({ syncInfo, updateSyncInfo, getDataForSync, applyServerD
     
     setStatus(SyncStatus.SYNCING);
     const pushOk = await pushToServer();
+    
+    // Esperar un poco antes del pull para evitar detectar nuestros propios cambios
+    if (pushOk) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
     const pullOk = await pullFromServer();
     
     if (pushOk || pullOk) {

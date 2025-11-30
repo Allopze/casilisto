@@ -2,12 +2,16 @@
  * Hook para manejar drag & drop / touch reordering de items.
  */
 import { useState, useRef, useCallback, useEffect } from 'react';
+import useNative from './useNative';
 
 export function useDragAndDrop(items, setItems) {
   const [draggingId, setDraggingId] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
   const [dragOverlay, setDragOverlay] = useState(null);
   const dragItem = useRef(null);
   const autoScrollRef = useRef(null);
+  const lastReorderTime = useRef(0);
+  const { vibrate } = useNative();
 
   // P3: Cancelar animación en cleanup del efecto
   useEffect(() => {
@@ -19,8 +23,13 @@ export function useDragAndDrop(items, setItems) {
     };
   }, []);
 
-  const handleReorder = (targetIndex) => {
+  const handleReorder = useCallback((targetIndex) => {
     if (dragItem.current !== null && dragItem.current !== targetIndex) {
+      // Throttle reorder para evitar actualizaciones muy rápidas
+      const now = Date.now();
+      if (now - lastReorderTime.current < 50) return;
+      lastReorderTime.current = now;
+      
       const newItems = [...items];
       const draggedItemContent = newItems[dragItem.current];
       const targetItemContent = newItems[targetIndex];
@@ -30,9 +39,13 @@ export function useDragAndDrop(items, setItems) {
       newItems.splice(dragItem.current, 1);
       newItems.splice(targetIndex, 0, draggedItemContent);
       dragItem.current = targetIndex;
+      setDragOverIndex(targetIndex);
       setItems(newItems);
+      
+      // Vibración suave al reordenar
+      vibrate('light');
     }
-  };
+  }, [items, setItems, vibrate]);
 
   // Auto-scroll cuando el item está cerca del borde
   const startAutoScroll = useCallback((clientY) => {
@@ -71,28 +84,35 @@ export function useDragAndDrop(items, setItems) {
     }
   }, []);
 
-  const onDragStart = (e, index) => {
+  const onDragStart = useCallback((e, index) => {
     dragItem.current = index;
     setDraggingId(items[index].id);
+    setDragOverIndex(index);
     e.dataTransfer.effectAllowed = 'move';
-  };
+    // Vibración al iniciar arrastre
+    vibrate('medium');
+  }, [items, vibrate]);
 
-  const onDragEnter = (_e, index) => {
+  const onDragEnter = useCallback((_e, index) => {
     handleReorder(index);
-  };
+  }, [handleReorder]);
 
-  const onDragEnd = () => {
+  const onDragEnd = useCallback(() => {
     dragItem.current = null;
     setDraggingId(null);
+    setDragOverIndex(null);
     stopAutoScroll();
-  };
+    // Vibración al soltar
+    vibrate('light');
+  }, [stopAutoScroll, vibrate]);
 
-  const handleTouchStart = (e, item, index) => {
+  const handleTouchStart = useCallback((e, item, index) => {
     const touch = e.touches[0];
     const target = e.currentTarget.parentElement;
     const rect = target.getBoundingClientRect();
     dragItem.current = index;
     setDraggingId(item.id);
+    setDragOverIndex(index);
     setDragOverlay({
       item,
       x: touch.clientX,
@@ -103,9 +123,14 @@ export function useDragAndDrop(items, setItems) {
       offsetY: touch.clientY - rect.top,
     });
     document.body.style.overflow = 'hidden';
-  };
+    // Prevenir selección de texto
+    document.body.style.userSelect = 'none';
+    document.body.style.webkitUserSelect = 'none';
+    // Vibración al iniciar arrastre táctil
+    vibrate('medium');
+  }, [vibrate]);
 
-  const handleTouchMove = (e) => {
+  const handleTouchMove = useCallback((e) => {
     if (!draggingId || !dragOverlay) return;
     if (e.cancelable) e.preventDefault();
     const touch = e.touches[0];
@@ -127,18 +152,25 @@ export function useDragAndDrop(items, setItems) {
         }
       }
     }
-  };
+  }, [draggingId, dragOverlay, startAutoScroll, handleReorder]);
 
-  const handleTouchEnd = () => {
+  const handleTouchEnd = useCallback(() => {
     setDraggingId(null);
     setDragOverlay(null);
+    setDragOverIndex(null);
     dragItem.current = null;
     document.body.style.overflow = '';
+    // Restaurar selección de texto
+    document.body.style.userSelect = '';
+    document.body.style.webkitUserSelect = '';
     stopAutoScroll();
-  };
+    // Vibración al soltar
+    vibrate('light');
+  }, [stopAutoScroll, vibrate]);
 
   return {
     draggingId,
+    dragOverIndex,
     dragOverlay,
     onDragStart,
     onDragEnter,

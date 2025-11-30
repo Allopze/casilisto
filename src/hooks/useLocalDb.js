@@ -596,7 +596,10 @@ export function useLocalDb() {
   // Función para aplicar datos del servidor
   // IMPORTANTE: Nunca sobrescribir con datos vacíos
   // P2: Validar estructura de datos antes de aplicar
+  // NUEVO: No incrementar dataVersion si los datos son equivalentes
   const applyServerData = useCallback((serverData) => {
+    let hasChanges = false;
+    
     // P2: Solo aplicar items si hay al menos uno Y la estructura es válida
     if (serverData.items && Array.isArray(serverData.items) && serverData.items.length > 0) {
       const normalizedItems = normalizeItemList(serverData.items);
@@ -605,7 +608,16 @@ export function useLocalDb() {
         item.id && item.text && item.category
       );
       if (validItems.length > 0) {
-        setItems(validItems);
+        // Comparar si realmente hay cambios
+        const currentIds = new Set(dataRef.current.items.map(i => `${i.id}-${i.completed}-${i.quantity}`));
+        const newIds = new Set(validItems.map(i => `${i.id}-${i.completed}-${i.quantity}`));
+        const isDifferent = validItems.length !== dataRef.current.items.length ||
+          [...newIds].some(id => !currentIds.has(id));
+        
+        if (isDifferent) {
+          setItems(validItems);
+          hasChanges = true;
+        }
       }
     }
     // P2: Solo aplicar categories si hay al menos una Y la estructura es válida
@@ -614,22 +626,39 @@ export function useLocalDb() {
       // Verificar que al menos una categoría tiene la estructura correcta
       const hasValidCats = Object.values(normalizedCats).some(cat => cat && cat.color);
       if (hasValidCats) {
-        setCategories(normalizedCats);
+        const currentCatKeys = Object.keys(dataRef.current.categories).sort().join(',');
+        const newCatKeys = Object.keys(normalizedCats).sort().join(',');
+        if (currentCatKeys !== newCatKeys) {
+          setCategories(normalizedCats);
+          hasChanges = true;
+        }
       }
     }
     // Solo aplicar masterList si hay al menos uno
     if (serverData.masterList && Array.isArray(serverData.masterList) && serverData.masterList.length > 0) {
-      setMasterList(normalizeItemList(serverData.masterList));
+      if (serverData.masterList.length !== dataRef.current.masterList.length) {
+        setMasterList(normalizeItemList(serverData.masterList));
+        hasChanges = true;
+      }
     }
     // Favoritos pueden estar vacíos, eso es válido
     if (serverData.favorites && Array.isArray(serverData.favorites)) {
-      setFavorites(normalizeItemList(serverData.favorites));
+      if (serverData.favorites.length !== dataRef.current.favorites.length) {
+        setFavorites(normalizeItemList(serverData.favorites));
+        hasChanges = true;
+      }
     }
     // Sincronizar modo Baco
-    if (typeof serverData.bacoMode === 'boolean') {
+    if (typeof serverData.bacoMode === 'boolean' && serverData.bacoMode !== dataRef.current.bacoMode) {
       setBacoMode(serverData.bacoMode);
+      hasChanges = true;
     }
-    setDataVersion(v => v + 1);
+    
+    // Solo incrementar dataVersion si realmente hubo cambios
+    // Esto evita ciclos de re-render innecesarios
+    if (hasChanges) {
+      setDataVersion(v => v + 1);
+    }
   }, []);
 
   // Obtener lastModified de localStorage

@@ -1,7 +1,7 @@
 /**
  * Componente que muestra un ítem de la lista de compras
  */
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Plus, Trash2, Minus, GripVertical, ChevronUp, Edit3, Star } from 'lucide-react';
 import useNative from '../hooks/useNative';
 
@@ -9,6 +9,7 @@ export default function ShoppingItem({
   item,
   isExpanded,
   isDragging,
+  isDragOver,
   categories,
   isFavorite,
   bacoMode,
@@ -27,7 +28,7 @@ export default function ShoppingItem({
   // Verificar si el item es de la categoría Vinos y Modo Baco está activo
   const isBacoProtected = bacoMode && item.category === 'Vinos';
 
-  const handleToggle = async () => {
+  const handleToggle = useCallback(async () => {
     if (isBacoProtected) {
       // Vibrar usando haptics nativo o fallback
       await vibrate('error');
@@ -36,8 +37,10 @@ export default function ShoppingItem({
       setTimeout(() => setIsShaking(false), 500);
       return;
     }
+    // Vibración al marcar/desmarcar completado
+    await vibrate('light');
     onToggle();
-  };
+  }, [isBacoProtected, vibrate, onToggle]);
 
   return (
     <div
@@ -47,14 +50,18 @@ export default function ShoppingItem({
       onDragEnter={onDragEnter}
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
-      className={`bg-white rounded-2xl shadow-sm border transition-all touch-manipulation ${
-        isDragging ? 'opacity-30 bg-stone-50 border-stone-100' : ''
-      } ${isBacoProtected ? 'border-purple-200 bg-purple-50/30' : 'border-stone-100'} ${
-        isShaking ? 'animate-shake' : ''
-      }`}
+      className={`relative bg-white rounded-2xl shadow-sm border transition-all duration-200 touch-manipulation select-none-all ${
+        isDragging ? 'opacity-30 scale-95 bg-stone-50 border-stone-100' : ''
+      } ${isDragOver ? 'transform translate-y-2 border-yellow-400 border-2' : ''} ${
+        isBacoProtected ? 'border-purple-200 bg-purple-50/30' : 'border-stone-100'
+      } ${isShaking ? 'animate-shake' : ''}`}
       role="listitem"
       aria-label={`${item.text}, cantidad ${item.quantity}`}
     >
+      {/* Indicador de inserción cuando hay drag over */}
+      {isDragOver && (
+        <div className="absolute -top-3 left-4 right-4 h-1 bg-yellow-400 rounded-full shadow-lg" />
+      )}
       <div className="flex items-center p-3 relative">
         {/* Drag handle - área táctil aumentada */}
         <div
