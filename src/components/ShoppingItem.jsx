@@ -2,7 +2,7 @@
  * Componente que muestra un ítem de la lista de compras
  */
 import React, { useState, useCallback } from 'react';
-import { Plus, Trash2, Minus, GripVertical, ChevronUp, Edit3, Star } from 'lucide-react';
+import { Plus, Trash2, Minus, GripVertical, ChevronUp, Edit3 } from 'lucide-react';
 import useNative from '../hooks/useNative';
 
 export default function ShoppingItem({
@@ -11,14 +11,12 @@ export default function ShoppingItem({
   isDragging,
   isDragOver,
   categories,
-  isFavorite,
   bacoMode,
   onToggle,
   onExpand,
   onQuantityChange,
   onEditChange,
   onDelete,
-  onToggleFavorite,
   dragHandlers,
 }) {
   const { onDragStart, onDragEnter, onDragEnd, onTouchStart, onTouchMove, onTouchEnd } = dragHandlers;
@@ -166,23 +164,11 @@ export default function ShoppingItem({
                 ))}
               </select>
             </div>
-            {/* Botones en stack vertical para móviles */}
-            <div className="flex flex-col sm:flex-row gap-2 mt-1">
-              <button
-                onClick={onToggleFavorite}
-                className={`flex-1 h-11 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all focus:ring-2 focus:outline-none ${
-                  isFavorite 
-                    ? 'bg-yellow-200 text-yellow-900 focus:ring-yellow-300' 
-                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200 focus:ring-stone-300'
-                }`}
-                aria-pressed={isFavorite}
-              >
-                <Star className={`w-4 h-4 ${isFavorite ? 'fill-yellow-600' : ''}`} aria-hidden="true" />
-                {isFavorite ? 'Quitar favorito' : 'Marcar favorito'}
-              </button>
+            {/* Botón eliminar */}
+            <div className="flex justify-end mt-1">
               <button
                 onClick={onDelete}
-                className="flex-1 sm:flex-none h-11 px-4 bg-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-200 flex items-center justify-center gap-2 transition-all focus:ring-2 focus:ring-red-300 focus:outline-none"
+                className="h-11 px-4 bg-red-100 text-red-600 rounded-xl font-bold text-sm hover:bg-red-200 flex items-center justify-center gap-2 transition-all focus:ring-2 focus:ring-red-300 focus:outline-none"
               >
                 <Trash2 className="w-4 h-4" aria-hidden="true" /> Eliminar
               </button>

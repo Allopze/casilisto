@@ -34,14 +34,12 @@ import useLocalDb, {
   getInitialCategories,
   getInitialMasterList,
   getInitialItems,
-  getInitialFavorites,
   RESERVED_CATEGORIES,
 } from './hooks/useLocalDb';
 import useDragAndDrop from './hooks/useDragAndDrop';
 import useSync, { SyncStatus } from './hooks/useSync';
 import useNative, { useNativeInit } from './hooks/useNative';
 import Sidebar from './components/Sidebar';
-import FavoritesBar from './components/FavoritesBar';
 import ShoppingItem from './components/ShoppingItem';
 import ConfirmModal from './components/ConfirmModal';
 import { useToast } from './components/Toast';
@@ -83,7 +81,6 @@ export default function App() {
     categories, setCategories, 
     masterList, setMasterList, 
     items, setItems, 
-    favorites, setFavorites,
     bacoMode, setBacoMode,
     // Propiedades de sync
     syncInfo, updateSyncInfo, getDataForSync, applyServerData, getLastModified, dataVersion,
@@ -183,44 +180,6 @@ export default function App() {
     setNewItemText('');
     setSelectedCategory('Otros');
     setShowSuggestions(false);
-  };
-
-  const isFavorite = (text) => favorites.some((f) => f.text.toLowerCase() === text.toLowerCase());
-
-  const toggleFavorite = (item) => {
-    if (isFavorite(item.text)) {
-      setFavorites(favorites.filter((f) => f.text.toLowerCase() !== item.text.toLowerCase()));
-    } else {
-      setFavorites([...favorites, { text: item.text, category: item.category }]);
-    }
-  };
-
-  const addFavoriteToList = (fav) => {
-    const existing = items.find((i) => i.text.toLowerCase() === fav.text.toLowerCase() && !i.completed);
-    if (existing) {
-      setItems(items.map((i) => (i.id === existing.id ? { ...i, quantity: (i.quantity || 1) + 1 } : i)));
-    } else {
-      // P2: Si la categoría del favorito no existe, usar 'Otros' y actualizar el favorito
-      const categoryExists = categories[fav.category];
-      const category = categoryExists ? fav.category : 'Otros';
-      
-      // Actualizar el favorito si su categoría era huérfana
-      if (!categoryExists && fav.category !== 'Otros') {
-        setFavorites(favorites.map(f => 
-          f.text.toLowerCase() === fav.text.toLowerCase() 
-            ? { ...f, category: 'Otros' } 
-            : f
-        ));
-      }
-      
-      setItems([...items, { 
-        id: crypto.randomUUID(), // P0: UUID en lugar de Date.now()
-        text: fav.text, 
-        category, 
-        completed: false, 
-        quantity: 1 
-      }]);
-    }
   };
 
   const itemsToBuy = items.filter((item) => !item.completed);
@@ -347,14 +306,12 @@ export default function App() {
                 isDragging={draggingId === item.id}
                 isDragOver={draggingId && draggingId !== item.id && dragOverIndex === item.originalIndex}
                 categories={categories}
-                isFavorite={isFavorite(item.text)}
                 bacoMode={bacoMode}
                 onToggle={() => toggleItem(item.id)}
                 onExpand={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
                 onQuantityChange={(delta) => updateQuantity(item.id, delta)}
                 onEditChange={(field, value) => handleEditChange(item.id, field, value)}
                 onDelete={() => deleteItem(item.id)}
-                onToggleFavorite={() => toggleFavorite(item)}
                 dragHandlers={{
                   onDragStart: (e) => onDragStart(e, item.originalIndex),
                   onDragEnter: (e) => onDragEnter(e, item.originalIndex),
@@ -428,13 +385,6 @@ export default function App() {
       </header>
 
       <main className="max-w-md mx-auto p-4">
-        <FavoritesBar
-          favorites={favorites}
-          itemsCompleted={itemsCompleted}
-          onAddFavorite={addFavoriteToList}
-          onRepeatCompleted={repeatCompletedItems}
-        />
-
         {/* Formulario Añadir */}
         <form onSubmit={addItem} className="mb-6 relative z-10" ref={wrapperRef}>
           <div className="relative">
@@ -635,6 +585,5 @@ export {
   getInitialCategories,
   getInitialMasterList,
   getInitialItems,
-  getInitialFavorites,
 };
 
